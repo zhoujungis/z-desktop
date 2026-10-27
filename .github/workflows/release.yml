@@ -1,21 +1,27 @@
 name: CI / Release
 
-# PR：全量测试 + 打包验证
-# push 到 main/master：全量测试 + 打包 + 自动打 tag / 创建 Release
-# 手动触发：同 push（版本号未变且 tag 已存在时跳过发布）
+# PR：全量测试 + Windows 打包验证（不发布）
+# push main/master：全量测试 + 自动递增版本 + 打包 + 提交版本号 + 打 tag + 发布 Release
+# workflow_dispatch：同上，可手动选择 patch / minor / major
 on:
   push:
     branches: [main, master]
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+    inputs:
+      bump:
+        description: "版本递增类型"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
 
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -23,7 +29,7 @@ env:
 
 jobs:
   # ------------------------------------------------------------------
-  # 1. 全量测试：版本一致性、类型检查、前端单测、Rust 单测/集成测试、Clippy
+  # 1. 全量测试
   # ------------------------------------------------------------------
   test:
     name: Test
@@ -64,6 +70,13 @@ jobs:
           test "$PKG_VERSION" = "$TAURI_VERSION"
           test "$PKG_VERSION" = "$CARGO_VERSION"
 
+      - name: Validate version bump script
+        shell: bash
+        run: |
+          NEXT=$(node scripts/bump-version.mjs --bump patch --dry-run)
+          echo "next patch version: $NEXT"
+          test -n "$NEXT"
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -83,11 +96,12 @@ jobs:
         working-directory: src-tauri
 
   # ------------------------------------------------------------------
-  # 2. Windows 打包：产出 NSIS .exe 与 .msi
+  # 2. PR 打包验证：产出 NSIS .exe 与 .msi
   # ------------------------------------------------------------------
-  build:
-    name: Build Windows bundles
+  build-pr:
+    name: Build Windows bundles (PR)
     needs: test
+    if: github.event_name == 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -131,16 +145,14 @@ jobs:
           path: release-assets/*
 
   # ------------------------------------------------------------------
-  # 3. 自动打 tag + 创建 GitHub Release
-  #    版本号来自 package.json；tag 已存在时跳过，避免重复发布。
-  #    发新版本时请同时提升 package.json / tauri.conf.json / Cargo.toml。
+  # 3. 自动递增版本 + 打包 + 打 tag + 发布 Release
   # ------------------------------------------------------------------
   release:
-    name: Tag & Release
-    needs: build
+    name: Auto bump, build & release
+    needs: test
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: windows-latest
+    timeout-minutes: 90
     permissions:
       contents: write
     steps:
@@ -153,57 +165,84 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
 
-      - name: Download bundles
-        uses: actions/download-artifact@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
         with:
-          name: z-desktop-windows-x64
-          path: artifacts
+          workspaces: src-tauri -> target
 
-      - name: Compute version and check tag
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Bump version
         id: version
         shell: bash
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          TAG="v${VERSION}"
+          BUMP="${{ inputs.bump || 'patch' }}"
+          VERSION=$(node scripts/bump-version.mjs --bump "$BUMP")
+          TAG="v$VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists; refusing to overwrite."
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Tag $TAG already exists; skipping release."
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
+          echo "Bump: $BUMP -> $VERSION"
 
-          case "$VERSION" in
-            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
-            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
-          esac
+      - name: Build Tauri app (NSIS + MSI)
+        run: npm run tauri -- build --bundles nsis,msi
+
+      - name: Stage release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Copy-Item src-tauri/target/release/bundle/nsis/*.exe release-assets/
+          Copy-Item src-tauri/target/release/bundle/msi/*.msi release-assets/
+          Get-ChildItem release-assets
 
       - name: Generate checksums
-        if: steps.version.outputs.exists == 'false'
         shell: bash
         run: |
-          cd artifacts
+          cd release-assets
           sha256sum *.exe *.msi > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: Create tag and release
-        if: steps.version.outputs.exists == 'false'
+      # 只有测试和打包都成功后才提交版本号、打 tag，失败不会留下脏版本
+      - name: Commit version bump and tag
+        id: publish
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+          if git diff --cached --quiet; then
+            echo "::error::Version bump produced no changes."
+            exit 1
+          fi
+          git commit -m "chore: release ${{ steps.version.outputs.tag }} [skip ci]"
+          git push origin "HEAD:${{ github.ref_name }}"
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ steps.publish.outputs.sha }}
           generate_release_notes: true
           prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
           files: |
-            artifacts/*.exe
-            artifacts/*.msi
-            artifacts/SHA256SUMS.txt
-
-      - name: Notice when tag already exists
-        if: steps.version.outputs.exists == 'true'
-        run: |
-          echo "::notice::Tag ${{ steps.version.outputs.tag }} already exists. Bump the version in package.json, src-tauri/tauri.conf.json and src-tauri/Cargo.toml to publish a new release."
+            release-assets/*.exe
+            release-assets/*.msi
+            release-assets/SHA256SUMS.txt

@@ -615,6 +615,8 @@ z-desktop/
 │   ├── tools/                      # 工具展示元数据
 │   ├── App.vue
 │   └── main.ts
+├── scripts/
+│   └── bump-version.mjs            # 同步递增 5 个版本文件
 ├── src-tauri/                      # Rust Core
 │   ├── capabilities/default.json   # Tauri 权限
 │   ├── src/
@@ -659,6 +661,7 @@ z-desktop/
 | `cargo fmt --all -- --check` | Rust 格式检查 |
 | `cargo test --all-targets --locked` | Rust 单元 + 集成测试 |
 | `cargo clippy --all-targets --locked -- -D warnings` | Clippy 零警告检查 |
+| `node scripts/bump-version.mjs --bump patch --dry-run` | 预览下一个版本号 |
 
 ### 11.2 测试覆盖
 
@@ -678,37 +681,49 @@ Rust 集成测试覆盖：文件系统全生命周期、Shell 输出 / 退出码
 
 | Job | 运行环境 | 内容 |
 |---|---|---|
-| **Test** | `windows-latest` | 版本一致性 → `typecheck` → 前端单测 → Rust 格式检查 → Rust 单测 / 集成测试 → Clippy `-D warnings` |
-| **Build** | `windows-latest` | `tauri build --bundles nsis,msi`，上传 `.exe` / `.msi` artifact |
-| **Release** | `ubuntu-latest` | 读取版本号 → 检查 tag → 生成 SHA256 → 创建 tag / GitHub Release |
+| **Test** | `windows-latest` | 版本一致性 + bump 脚本自检 → `typecheck` → 前端单测 → Rust 格式检查 → Rust 单测 / 集成测试 → Clippy `-D warnings` |
+| **Build PR** | `windows-latest` | PR 上验证 `tauri build --bundles nsis,msi`，上传 `.exe` / `.msi` artifact |
+| **Release** | `windows-latest` | 自动递增版本 → 打包 → 提交版本号 → 打 tag → 发布 GitHub Release |
 
 触发方式：
 
 | 事件 | 行为 |
 |---|---|
-| Pull Request | Test + Build，不发布 |
-| push `main` / `master` | Test + Build；tag 不存在时自动发布 |
-| `workflow_dispatch` | 同 push |
+| Pull Request | Test + Build PR，不发布 |
+| push `main` / `master` | Test + Release：自动 patch 递增并发布新版本 |
+| `workflow_dispatch` | 同 push，可手动选择 patch / minor / major |
 
-### 11.4 发布新版本
+### 11.4 自动发布（无需手改版本号）
 
-1. 同步提升三处版本号：
+每次 push 到 `main` / `master` 都会自动完成：
+
+1. 读取当前版本，按 **patch** 递增（手动触发可选 minor / major）。
+2. `scripts/bump-version.mjs` 同步更新 5 个文件：
    - `package.json`
+   - `package-lock.json`
    - `src-tauri/tauri.conf.json`
    - `src-tauri/Cargo.toml`
-2. 合并到 `main` / `master`。
-3. workflow 自动创建 `vX.Y.Z` tag，并发布附带以下文件的 Release：
+   - `src-tauri/Cargo.lock`
+3. 使用新版本构建 NSIS `.exe` 与 MSI `.msi`。
+4. **只有测试和打包都成功后**，才提交 `chore: release vX.Y.Z [skip ci]` 并推送。
+5. 创建 `vX.Y.Z` tag，发布 GitHub Release，附带：
    - NSIS 安装包 `.exe`
    - MSI 安装包 `.msi`
    - `SHA256SUMS.txt`
 
-规则：
+例如当前 `0.1.0` 且 tag 已存在，下一次 push 会自动发布 `v0.1.1`。
 
-- 版本号未变、tag 已存在 → 跳过发布并输出 notice。
-- 版本号包含 `-`（如 `0.2.0-beta.1`）→ 自动标记为 prerelease。
-- 工作流会先做版本一致性检查，三处版本不一致会直接失败。
+规则与注意事项：
+
+- 版本号不再需要手动修改；`bump-version.mjs` 会保证五处版本一致。
+- 版本递增提交由 `GITHUB_TOKEN` 推送，带 `[skip ci]`，不会再次触发 workflow。
+- 标签已存在时直接报错，不会覆盖已有 tag。
+- 版本号包含 `-`（如 `0.2.0-beta.1`）时自动标记为 prerelease。
+- PR 只做测试和打包验证，不会产生版本提交或 Release。
 - 首次使用需在仓库 **Settings → Actions → General → Workflow permissions** 允许
   `Read and write permissions`（或允许 workflow 申请 `contents: write`）。
+- 如果 `main` 开启分支保护，需要允许 GitHub Actions 直接 push，否则发布会在推送版本提交时失败。
+- 本地预览下一个版本号：`node scripts/bump-version.mjs --bump patch --dry-run`。
 
 ---
 
