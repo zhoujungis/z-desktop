@@ -1,0 +1,17 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+src-tauri/target
+src-tauri/gen/schemas
+
+.commandcode/
+.vscode/
+.idea/
+*.db
+.env
+.env.*
+
+.DS_Store
+*.log

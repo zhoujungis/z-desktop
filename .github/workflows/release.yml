@@ -1,0 +1,205 @@
+name: CI / Release
+
+# PR：全量测试 + 打包验证
+# push 到 main/master：全量测试 + 打包 + 自动打 tag / 创建 Release
+# 手动触发：同 push（版本号未变且 tag 已存在时跳过发布）
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  NODE_VERSION: "20"
+
+jobs:
+  # ------------------------------------------------------------------
+  # 1. 全量测试：版本一致性、类型检查、前端单测、Rust 单测/集成测试、Clippy
+  # ------------------------------------------------------------------
+  test:
+    name: Test
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Check version consistency
+        shell: bash
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAURI_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          CARGO_VERSION=$(grep -m1 '^version = ' src-tauri/Cargo.toml | cut -d'"' -f2)
+          echo "package.json=$PKG_VERSION"
+          echo "tauri.conf.json=$TAURI_VERSION"
+          echo "Cargo.toml=$CARGO_VERSION"
+          test "$PKG_VERSION" = "$TAURI_VERSION"
+          test "$PKG_VERSION" = "$CARGO_VERSION"
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Frontend unit tests
+        run: npm test
+
+      - name: Rust tests (unit + integration)
+        run: cargo test --all-targets --locked
+        working-directory: src-tauri
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+        working-directory: src-tauri
+
+  # ------------------------------------------------------------------
+  # 2. Windows 打包：产出 NSIS .exe 与 .msi
+  # ------------------------------------------------------------------
+  build:
+    name: Build Windows bundles
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build Tauri app (NSIS + MSI)
+        run: npm run tauri -- build --bundles nsis,msi
+
+      - name: Stage release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Copy-Item src-tauri/target/release/bundle/nsis/*.exe release-assets/
+          Copy-Item src-tauri/target/release/bundle/msi/*.msi release-assets/
+          Get-ChildItem release-assets
+
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: z-desktop-windows-x64
+          if-no-files-found: error
+          retention-days: 7
+          path: release-assets/*
+
+  # ------------------------------------------------------------------
+  # 3. 自动打 tag + 创建 GitHub Release
+  #    版本号来自 package.json；tag 已存在时跳过，避免重复发布。
+  #    发新版本时请同时提升 package.json / tauri.conf.json / Cargo.toml。
+  # ------------------------------------------------------------------
+  release:
+    name: Tag & Release
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download bundles
+        uses: actions/download-artifact@v4
+        with:
+          name: z-desktop-windows-x64
+          path: artifacts
+
+      - name: Compute version and check tag
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag $TAG already exists; skipping release."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          case "$VERSION" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Generate checksums
+        if: steps.version.outputs.exists == 'false'
+        shell: bash
+        run: |
+          cd artifacts
+          sha256sum *.exe *.msi > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create tag and release
+        if: steps.version.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
+          files: |
+            artifacts/*.exe
+            artifacts/*.msi
+            artifacts/SHA256SUMS.txt
+
+      - name: Notice when tag already exists
+        if: steps.version.outputs.exists == 'true'
+        run: |
+          echo "::notice::Tag ${{ steps.version.outputs.tag }} already exists. Bump the version in package.json, src-tauri/tauri.conf.json and src-tauri/Cargo.toml to publish a new release."
