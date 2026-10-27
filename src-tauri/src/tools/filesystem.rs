@@ -152,7 +152,9 @@ pub fn search(input: &Value) -> Result<Value, String> {
     let path = get_path(input, "path")?;
     let pattern = param_str(input, "pattern").ok_or("缺少参数 pattern")?;
     sandbox::check_path(&path, PathOp::Read)?;
-    let max_results = param_u64(input, "max_results").unwrap_or(200).clamp(1, 2000) as usize;
+    let max_results = param_u64(input, "max_results")
+        .unwrap_or(200)
+        .clamp(1, 2000) as usize;
     let re = regex::Regex::new(&glob_to_regex(pattern)).map_err(|e| e.to_string())?;
 
     let mut matches: Vec<Value> = Vec::new();
@@ -175,11 +177,11 @@ pub fn search(input: &Value) -> Result<Value, String> {
 fn copy_dir_recursive(from: &Path, to: &Path) -> Result<u64, String> {
     fs::create_dir_all(to).map_err(|e| e.to_string())?;
     let mut count = 0u64;
-    for entry in walkdir::WalkDir::new(from).into_iter().filter_map(|e| e.ok()) {
-        let rel = entry
-            .path()
-            .strip_prefix(from)
-            .map_err(|e| e.to_string())?;
+    for entry in walkdir::WalkDir::new(from)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        let rel = entry.path().strip_prefix(from).map_err(|e| e.to_string())?;
         let target = to.join(rel);
         if entry.file_type().is_dir() {
             fs::create_dir_all(&target).map_err(|e| e.to_string())?;
@@ -187,7 +189,8 @@ fn copy_dir_recursive(from: &Path, to: &Path) -> Result<u64, String> {
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
-            fs::copy(entry.path(), &target).map_err(|e| format!("复制 {} 失败: {e}", entry.path().display()))?;
+            fs::copy(entry.path(), &target)
+                .map_err(|e| format!("复制 {} 失败: {e}", entry.path().display()))?;
             count += 1;
         }
     }
@@ -315,7 +318,10 @@ pub fn delete(input: &Value) -> Result<Value, String> {
             fs::remove_file(&p).map_err(|e| format!("删除符号链接失败: {e}"))?;
         }
     } else if meta.is_dir() {
-        let empty = fs::read_dir(&p).map_err(|e| e.to_string())?.next().is_none();
+        let empty = fs::read_dir(&p)
+            .map_err(|e| e.to_string())?
+            .next()
+            .is_none();
         if !empty && !recursive {
             return Err("目录非空，需要 recursive=true".into());
         }

@@ -6,8 +6,11 @@ use serde_json::{json, Value};
 use std::process::{Command, Stdio};
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
+/// sysinfo 的 CPU 使用率需要两次刷新（间隔至少 ~200ms）才有意义。
 fn refresh_all() -> System {
     let mut sys = System::new();
+    sys.refresh_processes(ProcessesToUpdate::All, true);
+    std::thread::sleep(std::time::Duration::from_millis(200));
     sys.refresh_processes(ProcessesToUpdate::All, true);
     sys
 }
@@ -54,6 +57,8 @@ pub fn inspect(input: &Value) -> Result<Value, String> {
     let pid_raw = param_u64(input, "pid").ok_or("缺少参数 pid")?;
     let pid = Pid::from_u32(pid_raw as u32);
     let mut sys = System::new();
+    sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+    std::thread::sleep(std::time::Duration::from_millis(200));
     sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
     let p = sys
         .process(pid)

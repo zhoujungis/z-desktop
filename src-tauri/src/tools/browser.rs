@@ -59,9 +59,7 @@ pub async fn open(state: &AppState, input: &Value) -> Result<Value, String> {
         .await
         .map_err(|e| format!("启动浏览器失败: {e}（请确认本机已安装 Chrome 或 Edge）"))?;
     // Handler 必须持续轮询，否则 CDP 事件不会分发
-    tokio::spawn(async move {
-        while handler.next().await.is_some() {}
-    });
+    tokio::spawn(async move { while handler.next().await.is_some() {} });
 
     let page = browser
         .new_page("about:blank")
@@ -78,9 +76,7 @@ pub async fn open(state: &AppState, input: &Value) -> Result<Value, String> {
 }
 
 pub async fn goto(state: &AppState, input: &Value) -> Result<Value, String> {
-    let url = param_str(input, "url")
-        .ok_or("缺少参数 url")?
-        .to_string();
+    let url = param_str(input, "url").ok_or("缺少参数 url")?.to_string();
     let page = current_page(state)?;
     page.goto(url.as_str())
         .await
@@ -149,9 +145,7 @@ pub async fn click(state: &AppState, input: &Value) -> Result<Value, String> {
 }
 
 pub async fn type_text(state: &AppState, input: &Value) -> Result<Value, String> {
-    let text = param_str(input, "text")
-        .ok_or("缺少参数 text")?
-        .to_string();
+    let text = param_str(input, "text").ok_or("缺少参数 text")?.to_string();
     let submit = param_bool(input, "submit").unwrap_or(false);
     let page = current_page(state)?;
     let selector = param_str(input, "selector").unwrap_or("input,textarea");
@@ -215,24 +209,31 @@ pub async fn screenshot(state: &AppState, input: &Value) -> Result<Value, String
 }
 
 pub async fn download(_state: &AppState, input: &Value) -> Result<Value, String> {
-    let url = param_str(input, "url")
-        .ok_or("缺少参数 url")?
-        .to_string();
-    let path = param_str(input, "path")
-        .ok_or("缺少参数 path")?
-        .to_string();
+    let url = param_str(input, "url").ok_or("缺少参数 url")?.to_string();
+    let path = param_str(input, "path").ok_or("缺少参数 path")?.to_string();
     crate::security::sandbox::check_path(&path, crate::security::sandbox::PathOp::Mutate)?;
 
     let resp = tauri_plugin_http::reqwest::get(&url)
         .await
         .map_err(|e| format!("下载请求失败: {e}"))?;
     let status = resp.status().as_u16();
+    const MAX_DOWNLOAD: u64 = 10 * 1024 * 1024;
+    if let Some(len) = resp.content_length() {
+        if len > MAX_DOWNLOAD {
+            return Err(format!("下载文件超过 10MB 上限（{len} bytes）"));
+        }
+    }
     let bytes = resp
         .bytes()
         .await
         .map_err(|e| format!("读取下载数据失败: {e}"))?;
-    if bytes.len() > 10 * 1024 * 1024 {
+    if bytes.len() as u64 > MAX_DOWNLOAD {
         return Err("下载文件超过 10MB 上限".into());
+    }
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建下载目录失败: {e}"))?;
+        }
     }
     std::fs::write(&path, &bytes).map_err(|e| format!("写入文件失败: {e}"))?;
     Ok(json!({
@@ -255,12 +256,7 @@ fn truncate(s: &str) -> String {
     format!("{}…（已截断）", &s[..end])
 }
 
-fn save_png(
-    state: &AppState,
-    png: &[u8],
-    kind: &str,
-    input: &Value,
-) -> Result<Value, String> {
+fn save_png(state: &AppState, png: &[u8], kind: &str, input: &Value) -> Result<Value, String> {
     let dir = state.data_dir.join("screenshots");
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建截图目录失败: {e}"))?;
     let ts = chrono::Local::now().format("%Y%m%d-%H%M%S%3f");

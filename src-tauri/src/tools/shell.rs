@@ -108,17 +108,38 @@ fn truncate_tail(s: &str) -> String {
     format!("…（已截断）{}", &s[start..])
 }
 
+/// 只保留尾部 MAX_OUTPUT 字节，避免大输出无限占用内存。
+/// 返回本次写入是否发生了丢弃。
+fn push_tail(buf: &mut Vec<u8>, data: &[u8]) -> bool {
+    if data.len() >= MAX_OUTPUT {
+        buf.clear();
+        buf.extend_from_slice(&data[data.len() - MAX_OUTPUT..]);
+        return true;
+    }
+    let overflow = (buf.len() + data.len()).saturating_sub(MAX_OUTPUT);
+    if overflow > 0 {
+        buf.drain(..overflow);
+    }
+    buf.extend_from_slice(data);
+    overflow > 0
+}
+
 /// 在独立线程读取输出管道（进程被杀后管道关闭即返回）
-fn drain<R: Read + Send + 'static>(
-    pipe: Option<R>,
-    tx: std::sync::mpsc::Sender<String>,
-) {
+fn drain<R: Read + Send + 'static>(pipe: Option<R>, tx: std::sync::mpsc::Sender<(String, bool)>) {
     std::thread::spawn(move || {
         let mut buf = Vec::new();
+        let mut truncated = false;
         if let Some(mut p) = pipe {
-            let _ = p.read_to_end(&mut buf);
+            let mut chunk = [0u8; 8192];
+            loop {
+                match p.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => truncated |= push_tail(&mut buf, &chunk[..n]),
+                    Err(_) => break,
+                }
+            }
         }
-        let _ = tx.send(String::from_utf8_lossy(&buf).into_owned());
+        let _ = tx.send((String::from_utf8_lossy(&buf).into_owned(), truncated));
     });
 }
 
@@ -128,8 +149,8 @@ fn wait_loop(
     timeout_ms: u64,
     cancel: Arc<AtomicBool>,
 ) -> Result<Value, String> {
-    let (out_tx, out_rx) = std::sync::mpsc::channel();
-    let (err_tx, err_rx) = std::sync::mpsc::channel();
+    let (out_tx, out_rx) = std::sync::mpsc::channel::<(String, bool)>();
+    let (err_tx, err_rx) = std::sync::mpsc::channel::<(String, bool)>();
     drain(child.stdout.take(), out_tx);
     drain(child.stderr.take(), err_tx);
 
@@ -163,15 +184,28 @@ fn wait_loop(
     }
     let status = child.wait().map_err(|e| e.to_string())?;
 
-    let stdout = out_rx
+    let (stdout, stdout_truncated) = out_rx
         .recv_timeout(OUTPUT_WAIT)
-        .unwrap_or_else(|_| String::from("（输出读取超时）"));
-    let stderr = err_rx.recv_timeout(OUTPUT_WAIT).unwrap_or_default();
+        .unwrap_or_else(|_| (String::from("（输出读取超时）"), false));
+    let (stderr, stderr_truncated) = err_rx.recv_timeout(OUTPUT_WAIT).unwrap_or_default();
+
+    let stdout = truncate_tail(&stdout);
+    let stderr = truncate_tail(&stderr);
+    let stdout = if stdout_truncated {
+        format!("…（已截断）{stdout}")
+    } else {
+        stdout
+    };
+    let stderr = if stderr_truncated {
+        format!("…（已截断）{stderr}")
+    } else {
+        stderr
+    };
 
     Ok(json!({
         "exitCode": status.code().unwrap_or(-1),
-        "stdout": truncate_tail(&stdout),
-        "stderr": truncate_tail(&stderr),
+        "stdout": stdout,
+        "stderr": stderr,
         "duration": start.elapsed().as_millis() as u64,
         "timedOut": timed_out,
         "cancelled": cancelled,
@@ -265,5 +299,26 @@ mod tests {
     #[test]
     fn test_truncate_tail_no_op() {
         assert_eq!(truncate_tail("hello"), "hello");
+    }
+
+    #[test]
+    fn tail_buffer_keeps_only_recent_bytes() {
+        let mut buf = Vec::new();
+        assert!(!push_tail(&mut buf, b"START"));
+        assert!(push_tail(&mut buf, &vec![b'x'; MAX_OUTPUT + 100]));
+        assert_eq!(buf.len(), MAX_OUTPUT, "缓冲区不得超过上限");
+        assert!(!buf.starts_with(b"START"), "最早的内容应被丢弃");
+        assert!(buf.ends_with(b"x"));
+    }
+
+    #[test]
+    fn tail_buffer_handles_incremental_chunks() {
+        let mut buf = Vec::new();
+        let mut truncated = false;
+        for _ in 0..((MAX_OUTPUT / 8192) + 3) {
+            truncated |= push_tail(&mut buf, &[b'a'; 8192]);
+        }
+        assert!(truncated, "超过上限后应标记截断");
+        assert!(buf.len() <= MAX_OUTPUT);
     }
 }

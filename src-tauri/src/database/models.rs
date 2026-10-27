@@ -90,9 +90,15 @@ fn row_to_task(r: &Row) -> rusqlite::Result<Task> {
 }
 
 pub fn create_task(conn: &Connection, title: &str) -> Result<Task, String> {
+    let trimmed = title.trim();
+    let title: String = if trimmed.is_empty() {
+        "未命名任务".into()
+    } else {
+        trimmed.chars().take(200).collect()
+    };
     let task = Task {
         id: new_id(),
-        title: title.to_string(),
+        title,
         status: "pending".into(),
         created_at: now_ms(),
         updated_at: now_ms(),
@@ -100,7 +106,13 @@ pub fn create_task(conn: &Connection, title: &str) -> Result<Task, String> {
     };
     conn.execute(
         "INSERT INTO tasks (id, title, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![task.id, task.title, task.status, task.created_at, task.updated_at],
+        params![
+            task.id,
+            task.title,
+            task.status,
+            task.created_at,
+            task.updated_at
+        ],
     )
     .map_err(|e| e.to_string())?;
     Ok(task)
@@ -142,7 +154,8 @@ pub fn list_tasks(conn: &Connection, limit: i64) -> Result<Vec<Task>, String> {
     let rows = stmt
         .query_map([limit], row_to_task)
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 /// 追加任务步骤（Task Timeline，设计文档 #32）
@@ -224,7 +237,8 @@ pub fn list_steps(conn: &Connection, task_id: &str) -> Result<Vec<TaskStep>, Str
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 /// 记录事件（Activity 面板数据源，设计文档 #13）
@@ -249,7 +263,11 @@ pub fn append_event(
     Ok(ev)
 }
 
-pub fn list_events(conn: &Connection, task_id: Option<&str>, limit: i64) -> Result<Vec<EventRecord>, String> {
+pub fn list_events(
+    conn: &Connection,
+    task_id: Option<&str>,
+    limit: i64,
+) -> Result<Vec<EventRecord>, String> {
     let limit = limit.clamp(1, 5000);
     let mut stmt = conn
         .prepare(
@@ -268,10 +286,16 @@ pub fn list_events(conn: &Connection, task_id: Option<&str>, limit: i64) -> Resu
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
-pub fn save_message(conn: &Connection, task_id: Option<&str>, role: &str, content: &str) -> Result<Message, String> {
+pub fn save_message(
+    conn: &Connection,
+    task_id: Option<&str>,
+    role: &str,
+    content: &str,
+) -> Result<Message, String> {
     let msg = Message {
         id: new_id(),
         task_id: task_id.map(String::from),
@@ -302,10 +326,16 @@ pub fn list_messages(conn: &Connection, task_id: &str) -> Result<Vec<Message>, S
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
-pub fn add_memory(conn: &Connection, memory_type: &str, content: &str, source: Option<&str>) -> Result<Memory, String> {
+pub fn add_memory(
+    conn: &Connection,
+    memory_type: &str,
+    content: &str,
+    source: Option<&str>,
+) -> Result<Memory, String> {
     let m = Memory {
         id: new_id(),
         memory_type: memory_type.into(),
@@ -371,7 +401,8 @@ pub fn search_memories(conn: &Connection, query: &str, limit: i64) -> Result<Vec
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 pub fn list_projects(conn: &Connection) -> Result<Vec<Project>, String> {
@@ -395,7 +426,8 @@ pub fn list_projects(conn: &Connection) -> Result<Vec<Project>, String> {
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 pub fn add_project(
@@ -493,6 +525,17 @@ impl Default for AppSettings {
     }
 }
 
+impl AppSettings {
+    /// 归一化来自前端的设置，保证持久化与内存中的值一致。
+    pub fn normalized(mut self) -> Self {
+        self.max_steps = self.max_steps.clamp(1, 200);
+        if self.provider.trim().is_empty() {
+            self.provider = "openai".into();
+        }
+        self
+    }
+}
+
 pub fn load_settings(conn: &Connection) -> Result<AppSettings, String> {
     let mut stmt = conn
         .prepare("SELECT key, value FROM settings")
@@ -516,7 +559,8 @@ pub fn load_settings(conn: &Connection) -> Result<AppSettings, String> {
 }
 
 pub fn save_settings(conn: &Connection, settings: &AppSettings) -> Result<(), String> {
-    let value = serde_json::to_value(settings).map_err(|e| e.to_string())?;
+    let settings = settings.clone().normalized();
+    let value = serde_json::to_value(&settings).map_err(|e| e.to_string())?;
     if let Some(obj) = value.as_object() {
         for (k, v) in obj {
             conn.execute(
@@ -549,7 +593,10 @@ mod tests {
 
         // 特殊语法不应导致 MATCH 报错
         assert_eq!(search_memories(&conn, "深色", 10).unwrap().len(), 1);
-        assert_eq!(search_memories(&conn, "\"深色\" OR *", 10).unwrap().len(), 1);
+        assert_eq!(
+            search_memories(&conn, "\"深色\" OR *", 10).unwrap().len(),
+            1
+        );
         assert_eq!(search_memories(&conn, "alpha:beta", 10).unwrap().len(), 1);
         assert!(search_memories(&conn, "  ", 10).unwrap().is_empty());
         assert!(search_memories(&conn, "\"*", 10).unwrap().is_empty());
@@ -560,10 +607,18 @@ mod tests {
         let conn = setup();
         let task = create_task(&conn, "t").unwrap();
         update_task_status(&conn, &task.id, "completed").unwrap();
-        assert!(get_task(&conn, &task.id).unwrap().unwrap().completed_at.is_some());
+        assert!(get_task(&conn, &task.id)
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_some());
         update_task_status(&conn, &task.id, "running").unwrap();
         assert!(
-            get_task(&conn, &task.id).unwrap().unwrap().completed_at.is_none(),
+            get_task(&conn, &task.id)
+                .unwrap()
+                .unwrap()
+                .completed_at
+                .is_none(),
             "重新运行时不应保留旧的完成时间"
         );
     }
@@ -574,5 +629,38 @@ mod tests {
         create_task(&conn, "t").unwrap();
         assert_eq!(list_tasks(&conn, -5).unwrap().len(), 1);
         assert_eq!(list_events(&conn, None, -5).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn task_title_is_trimmed_and_capped() {
+        let conn = setup();
+        assert_eq!(create_task(&conn, "   ").unwrap().title, "未命名任务");
+        assert_eq!(create_task(&conn, "  hello  ").unwrap().title, "hello");
+        let long = "x".repeat(300);
+        assert_eq!(
+            create_task(&conn, &long).unwrap().title.chars().count(),
+            200
+        );
+    }
+
+    #[test]
+    fn settings_are_normalized_before_persisting() {
+        let conn = setup();
+        let settings = AppSettings {
+            provider: "  ".into(),
+            max_steps: 999,
+            ..AppSettings::default()
+        };
+        save_settings(&conn, &settings).unwrap();
+        let loaded = load_settings(&conn).unwrap();
+        assert_eq!(loaded.max_steps, 200);
+        assert_eq!(loaded.provider, "openai");
+
+        let low = AppSettings {
+            max_steps: 0,
+            ..AppSettings::default()
+        }
+        .normalized();
+        assert_eq!(low.max_steps, 1);
     }
 }

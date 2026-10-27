@@ -58,7 +58,11 @@ fn tool_definitions_complete_and_valid() {
 
     for d in &defs {
         assert!(!d.description.trim().is_empty(), "{} 缺少描述", d.name);
-        assert!(d.input_schema.is_object(), "{} 的 input_schema 应为对象", d.name);
+        assert!(
+            d.input_schema.is_object(),
+            "{} 的 input_schema 应为对象",
+            d.name
+        );
         assert!(
             ["safe", "low", "medium", "high", "critical"].contains(&d.risk_level),
             "{} 风险等级非法: {}",
@@ -107,10 +111,7 @@ fn tool_definitions_complete_and_valid() {
         "clipboard.write",
     ];
     for name in expected {
-        assert!(
-            defs.iter().any(|d| d.name == name),
-            "缺少关键工具: {name}"
-        );
+        assert!(defs.iter().any(|d| d.name == name), "缺少关键工具: {name}");
     }
 }
 
@@ -122,9 +123,13 @@ async fn filesystem_full_lifecycle() {
     let base = dir.path().to_string_lossy().to_string();
 
     // mkdir + write（含自动创建父目录）
-    run_tool(&state, "filesystem.mkdir", json!({ "path": format!("{base}/docs") }))
-        .await
-        .expect("mkdir 失败");
+    run_tool(
+        &state,
+        "filesystem.mkdir",
+        json!({ "path": format!("{base}/docs") }),
+    )
+    .await
+    .expect("mkdir 失败");
     let nested = format!("{base}/docs/nested/report.txt");
     run_tool(
         &state,
@@ -138,7 +143,10 @@ async fn filesystem_full_lifecycle() {
     let read = run_tool(&state, "filesystem.read", json!({ "path": nested }))
         .await
         .expect("read 失败");
-    assert_eq!(read["content"].as_str().unwrap(), "Z Desktop 集成测试内容 hello");
+    assert_eq!(
+        read["content"].as_str().unwrap(),
+        "Z Desktop 集成测试内容 hello"
+    );
 
     // stat
     let stat = run_tool(&state, "filesystem.stat", json!({ "path": nested }))
@@ -155,7 +163,9 @@ async fn filesystem_full_lifecycle() {
     )
     .await
     .expect("search 失败");
-    let arr = search["matches"].as_array().expect("search 应返回 matches 列表");
+    let arr = search["matches"]
+        .as_array()
+        .expect("search 应返回 matches 列表");
     assert!(
         arr.iter().any(|v| v.to_string().contains("report.txt")),
         "*.txt 应命中 report.txt: {search}"
@@ -174,7 +184,10 @@ async fn filesystem_full_lifecycle() {
     let r2 = run_tool(&state, "filesystem.read", json!({ "path": copied }))
         .await
         .expect("读取副本失败");
-    assert_eq!(r2["content"].as_str().unwrap(), "Z Desktop 集成测试内容 hello");
+    assert_eq!(
+        r2["content"].as_str().unwrap(),
+        "Z Desktop 集成测试内容 hello"
+    );
 
     // rename
     run_tool(
@@ -185,7 +198,11 @@ async fn filesystem_full_lifecycle() {
     .await
     .expect("rename 失败");
     let renamed = format!("{base}/renamed.txt");
-    assert!(run_tool(&state, "filesystem.stat", json!({ "path": renamed })).await.is_ok());
+    assert!(
+        run_tool(&state, "filesystem.stat", json!({ "path": renamed }))
+            .await
+            .is_ok()
+    );
 
     // move
     let moved = format!("{base}/docs/moved.txt");
@@ -196,13 +213,25 @@ async fn filesystem_full_lifecycle() {
     )
     .await
     .expect("move 失败");
-    assert!(run_tool(&state, "filesystem.stat", json!({ "path": moved })).await.is_ok());
-    assert!(run_tool(&state, "filesystem.stat", json!({ "path": renamed })).await.is_err());
+    assert!(
+        run_tool(&state, "filesystem.stat", json!({ "path": moved }))
+            .await
+            .is_ok()
+    );
+    assert!(
+        run_tool(&state, "filesystem.stat", json!({ "path": renamed }))
+            .await
+            .is_err()
+    );
 
     // list 包含目录内容
-    let list = run_tool(&state, "filesystem.list", json!({ "path": base, "depth": 3 }))
-        .await
-        .expect("list 失败");
+    let list = run_tool(
+        &state,
+        "filesystem.list",
+        json!({ "path": base, "depth": 3 }),
+    )
+    .await
+    .expect("list 失败");
     let list_str = list.to_string();
     assert!(list_str.contains("docs"), "list 应包含 docs 目录");
 
@@ -210,7 +239,11 @@ async fn filesystem_full_lifecycle() {
     run_tool(&state, "filesystem.delete", json!({ "path": moved }))
         .await
         .expect("delete 失败");
-    assert!(run_tool(&state, "filesystem.read", json!({ "path": moved })).await.is_err());
+    assert!(
+        run_tool(&state, "filesystem.read", json!({ "path": moved }))
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -241,9 +274,13 @@ async fn filesystem_rejects_protected_paths() {
 #[tokio::test]
 async fn shell_exec_basic_output_and_exit_code() {
     let (state, _dir) = setup();
-    let out = run_tool(&state, "shell.exec", json!({ "command": "echo z-desktop-ok" }))
-        .await
-        .expect("shell.exec 失败");
+    let out = run_tool(
+        &state,
+        "shell.exec",
+        json!({ "command": "echo z-desktop-ok" }),
+    )
+    .await
+    .expect("shell.exec 失败");
     assert_eq!(out["exitCode"].as_i64(), Some(0));
     assert!(out["stdout"].as_str().unwrap().contains("z-desktop-ok"));
     assert_eq!(out["timedOut"].as_bool(), Some(false));
@@ -276,20 +313,39 @@ async fn shell_exec_timeout_kills_process() {
     .await
     .expect("shell.exec 失败");
     assert_eq!(out["timedOut"].as_bool(), Some(true), "应标记超时");
-    assert!(out["duration"].as_u64().unwrap() < 4_000, "应在超时点终止而非等满 5s");
+    assert!(
+        out["duration"].as_u64().unwrap() < 4_000,
+        "应在超时点终止而非等满 5s"
+    );
 }
 
 #[tokio::test]
 async fn shell_exec_user_cancel_takes_effect() {
     let (state, _dir) = setup();
     // 模拟用户点击 Stop（设计文档 #40）：先置取消标志，再以该 task_id 发起命令
-    state.cancelled_tasks.lock().unwrap().insert("task-cancel".into());
-    let out = registry::execute(&state, Some("task-cancel"), "shell.exec", json!({ "command": "sleep 30" }))
-        .await
-        .expect("shell.exec 失败");
+    state
+        .cancelled_tasks
+        .lock()
+        .unwrap()
+        .insert("task-cancel".into());
+    let out = registry::execute(
+        &state,
+        Some("task-cancel"),
+        "shell.exec",
+        json!({ "command": "sleep 30" }),
+    )
+    .await
+    .expect("shell.exec 失败");
     // poll_cancel 置位取消标志后 wait_loop 终止进程
-    assert_eq!(out["cancelled"].as_bool(), Some(true), "取消后应返回 cancelled=true");
-    assert!(out["duration"].as_u64().unwrap() < 10_000, "取消应远早于命令自然结束");
+    assert_eq!(
+        out["cancelled"].as_bool(),
+        Some(true),
+        "取消后应返回 cancelled=true"
+    );
+    assert!(
+        out["duration"].as_u64().unwrap() < 10_000,
+        "取消应远早于命令自然结束"
+    );
 }
 
 #[tokio::test]
@@ -305,7 +361,10 @@ async fn shell_exec_respects_cwd() {
     .expect("shell.exec 失败");
     assert_eq!(out["exitCode"].as_i64(), Some(0));
     assert!(
-        out["stdout"].as_str().unwrap().contains(dir.path().file_name().unwrap().to_str().unwrap()),
+        out["stdout"]
+            .as_str()
+            .unwrap()
+            .contains(dir.path().file_name().unwrap().to_str().unwrap()),
         "pwd 输出应位于临时目录内: {}",
         out["stdout"]
     );
@@ -314,7 +373,9 @@ async fn shell_exec_respects_cwd() {
 #[tokio::test]
 async fn shell_exec_empty_command_rejected() {
     let (state, _dir) = setup();
-    assert!(run_tool(&state, "shell.exec", json!({ "command": "   " })).await.is_err());
+    assert!(run_tool(&state, "shell.exec", json!({ "command": "   " }))
+        .await
+        .is_err());
     assert!(run_tool(&state, "shell.exec", json!({})).await.is_err());
 }
 
@@ -354,15 +415,29 @@ async fn windows_only_tools_degrade_gracefully() {
 #[tokio::test]
 async fn critical_commands_are_blocked() {
     let (state, _dir) = setup();
-    let out = run_agent_tool(&state, Some("t1"), "shell.exec", json!({ "command": "format c:" }))
-        .await
-        .expect("request_tool_execution 不应 Err");
-    assert_eq!(out["status"].as_str(), Some("blocked"), "CRITICAL 命令应默认禁止");
+    let out = run_agent_tool(
+        &state,
+        Some("t1"),
+        "shell.exec",
+        json!({ "command": "format c:" }),
+    )
+    .await
+    .expect("request_tool_execution 不应 Err");
+    assert_eq!(
+        out["status"].as_str(),
+        Some("blocked"),
+        "CRITICAL 命令应默认禁止"
+    );
     assert_eq!(out["riskLevel"].as_str(), Some("critical"));
 
-    let out2 = run_agent_tool(&state, Some("t1"), "shell.exec", json!({ "command": "shutdown /s /t 0" }))
-        .await
-        .expect("request_tool_execution 不应 Err");
+    let out2 = run_agent_tool(
+        &state,
+        Some("t1"),
+        "shell.exec",
+        json!({ "command": "shutdown /s /t 0" }),
+    )
+    .await
+    .expect("request_tool_execution 不应 Err");
     assert_eq!(out2["status"].as_str(), Some("blocked"));
 }
 
@@ -379,8 +454,59 @@ async fn safe_tool_auto_executes_without_approval() {
     )
     .await
     .expect("不应 Err");
-    assert_eq!(out["status"].as_str(), Some("executed"), "SAFE 工具默认自动执行");
+    assert_eq!(
+        out["status"].as_str(),
+        Some("executed"),
+        "SAFE 工具默认自动执行"
+    );
     assert!(out["result"].is_object() || out["result"].is_string());
+}
+
+#[tokio::test]
+async fn tool_calls_record_task_steps() {
+    let (state, dir) = setup();
+    let file = dir.path().join("step.txt");
+    std::fs::write(&file, "step-content").unwrap();
+
+    run_agent_tool(
+        &state,
+        Some("task-steps"),
+        "filesystem.read",
+        json!({ "path": file.to_string_lossy() }),
+    )
+    .await
+    .expect("读取应成功");
+
+    {
+        let conn = state.db.lock().unwrap();
+        let steps = m::list_steps(&conn, "task-steps").unwrap();
+        assert_eq!(steps.len(), 1, "成功调用应记录一条步骤");
+        assert_eq!(steps[0].tool.as_deref(), Some("filesystem.read"));
+        assert_eq!(steps[0].status.as_deref(), Some("completed"));
+        assert!(
+            steps[0]
+                .output
+                .as_deref()
+                .unwrap_or("")
+                .contains("step-content"),
+            "步骤应保存工具输出"
+        );
+    }
+
+    let blocked = run_agent_tool(
+        &state,
+        Some("task-steps"),
+        "shell.exec",
+        json!({ "command": "format c:" }),
+    )
+    .await
+    .expect("不应 Err");
+    assert_eq!(blocked["status"].as_str(), Some("blocked"));
+
+    let conn = state.db.lock().unwrap();
+    let steps = m::list_steps(&conn, "task-steps").unwrap();
+    assert_eq!(steps.len(), 2, "被拦截的命令也应记录步骤");
+    assert_eq!(steps[1].status.as_deref(), Some("blocked"));
 }
 
 #[tokio::test]
@@ -395,8 +521,15 @@ async fn medium_tool_requires_approval_then_allow_once() {
     )
     .await
     .expect("不应 Err");
-    assert_eq!(out["status"].as_str(), Some("approval_required"), "MEDIUM 默认需审批");
-    let rid = out["requestId"].as_str().expect("应返回 requestId").to_string();
+    assert_eq!(
+        out["status"].as_str(),
+        Some("approval_required"),
+        "MEDIUM 默认需审批"
+    );
+    let rid = out["requestId"]
+        .as_str()
+        .expect("应返回 requestId")
+        .to_string();
 
     // 批准前 pending_approvals 中存在该请求
     assert!(state.pending_approvals.lock().unwrap().contains_key(&rid));
@@ -416,7 +549,10 @@ async fn medium_tool_requires_approval_then_allow_once() {
     .await
     .expect("不应 Err");
     assert_eq!(out2["status"].as_str(), Some("executed"), "批准后应执行");
-    assert!(!state.pending_approvals.lock().unwrap().contains_key(&rid), "一次性审批应被消费");
+    assert!(
+        !state.pending_approvals.lock().unwrap().contains_key(&rid),
+        "一次性审批应被消费"
+    );
     assert!(dir.path().join("appr.txt").exists(), "文件应已写入");
 }
 
@@ -432,7 +568,9 @@ async fn approval_replay_with_changed_input_is_rejected() {
 
     // 用批准 A 的 requestId 执行 B（参数已变化）→ 拒绝（防"批准 A 执行 B"）
     let input_b = json!({ "path": dir.path().join("b.txt"), "content": "B" });
-    let result = agent::request_tool_execution(&state, Some("t4"), "filesystem.write", input_b, Some(&rid)).await;
+    let result =
+        agent::request_tool_execution(&state, Some("t4"), "filesystem.write", input_b, Some(&rid))
+            .await;
     assert!(result.is_err(), "参数变化的重放应被拒绝");
     assert!(!dir.path().join("b.txt").exists());
 }
@@ -447,7 +585,9 @@ async fn deny_prevents_execution() {
     let rid = out["requestId"].as_str().unwrap().to_string();
     agent::resolve_approval(&state, &rid, "deny", false).unwrap();
     // deny 后重放：审批请求无效（决策不是 allow）
-    let result = agent::request_tool_execution(&state, Some("t5"), "filesystem.write", input, Some(&rid)).await;
+    let result =
+        agent::request_tool_execution(&state, Some("t5"), "filesystem.write", input, Some(&rid))
+            .await;
     assert!(result.is_err(), "deny 后的重放应失败");
     assert!(!dir.path().join("no.txt").exists(), "deny 后不应执行");
 }
@@ -469,7 +609,11 @@ async fn always_allow_persists_rule_and_skips_approval() {
     let out2 = run_agent_tool(&state, Some("t6"), "filesystem.write", input)
         .await
         .expect("不应 Err");
-    assert_eq!(out2["status"].as_str(), Some("executed"), "命中 Always-allow 应直接执行");
+    assert_eq!(
+        out2["status"].as_str(),
+        Some("executed"),
+        "命中 Always-allow 应直接执行"
+    );
     let content = std::fs::read_to_string(&path).unwrap();
     assert_eq!(content, "v1");
 
@@ -482,17 +626,30 @@ async fn always_allow_persists_rule_and_skips_approval() {
     )
     .await
     .expect("不应 Err");
-    assert_eq!(out3["status"].as_str(), Some("approval_required"), "参数不同不应命中规则");
+    assert_eq!(
+        out3["status"].as_str(),
+        Some("approval_required"),
+        "参数不同不应命中规则"
+    );
 }
 
 #[tokio::test]
 async fn cancel_task_blocks_subsequent_steps() {
     let (state, _dir) = setup();
     agent::cancel_task(&state, "t7").expect("cancel_task 应成功");
-    let out = run_agent_tool(&state, Some("t7"), "filesystem.read", json!({ "path": "/tmp" }))
-        .await
-        .expect("不应 Err");
-    assert_eq!(out["status"].as_str(), Some("cancelled"), "已取消任务的后续步骤应立即返回 cancelled");
+    let out = run_agent_tool(
+        &state,
+        Some("t7"),
+        "filesystem.read",
+        json!({ "path": "/tmp" }),
+    )
+    .await
+    .expect("不应 Err");
+    assert_eq!(
+        out["status"].as_str(),
+        Some("cancelled"),
+        "已取消任务的后续步骤应立即返回 cancelled"
+    );
 }
 
 // ---------- 7. 数据库层 ----------
@@ -509,8 +666,24 @@ fn database_task_step_event_crud_and_fts() {
     let got = m::get_task(&conn, &task.id).unwrap().unwrap();
     assert_eq!(got.status, "running");
 
-    m::append_step(&conn, &task.id, Some("filesystem.list"), Some("{}"), Some("ok"), "completed").unwrap();
-    m::append_step(&conn, &task.id, Some("filesystem.move"), Some("{}"), Some("ok"), "completed").unwrap();
+    m::append_step(
+        &conn,
+        &task.id,
+        Some("filesystem.list"),
+        Some("{}"),
+        Some("ok"),
+        "completed",
+    )
+    .unwrap();
+    m::append_step(
+        &conn,
+        &task.id,
+        Some("filesystem.move"),
+        Some("{}"),
+        Some("ok"),
+        "completed",
+    )
+    .unwrap();
     let steps = m::list_steps(&conn, &task.id).unwrap();
     assert_eq!(steps.len(), 2, "应有两条步骤记录");
     assert_eq!(steps[0].step_index, 0, "step_index 应自动递增");
@@ -527,7 +700,15 @@ fn database_task_step_event_crud_and_fts() {
     assert_eq!(m::list_messages(&conn, &task.id).unwrap().len(), 2);
 
     // 项目
-    let proj = m::add_project(&conn, "Z Desktop", "/workspace/z-desktop", None, Some("Rust"), None).unwrap();
+    let proj = m::add_project(
+        &conn,
+        "Z Desktop",
+        "/workspace/z-desktop",
+        None,
+        Some("Rust"),
+        None,
+    )
+    .unwrap();
     m::set_active_project(&conn, Some(&proj.id)).unwrap();
     assert_eq!(m::get_active_project(&conn).unwrap().unwrap().id, proj.id);
 
@@ -569,8 +750,15 @@ fn database_fts_stays_in_sync_after_update() {
         rusqlite::params!["关键词 gamma delta", mem.id],
     )
     .unwrap();
-    assert!(m::search_memories(&conn, "alpha", 10).unwrap().is_empty(), "旧内容应从 FTS 索引移除");
-    assert_eq!(m::search_memories(&conn, "gamma", 10).unwrap().len(), 1, "新内容应进入 FTS 索引");
+    assert!(
+        m::search_memories(&conn, "alpha", 10).unwrap().is_empty(),
+        "旧内容应从 FTS 索引移除"
+    );
+    assert_eq!(
+        m::search_memories(&conn, "gamma", 10).unwrap().len(),
+        1,
+        "新内容应进入 FTS 索引"
+    );
 }
 
 // ---------- 8. 沙箱纯函数 ----------

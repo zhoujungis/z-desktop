@@ -8,8 +8,23 @@ Z Desktop 让 AI 在用户授权下观察电脑、理解任务、调用工具、
 
 ---
 
+## 界面预览
+
+> 以下为界面示意，使用示例数据生成。
+
+| 首页 | 任务详情 |
+|---|---|
+| ![首页](docs/screenshots/home.png) | ![任务详情](docs/screenshots/task.png) |
+| **文件管理** | **项目管理** |
+| ![文件](docs/screenshots/files.png) | ![项目](docs/screenshots/projects.png) |
+| **设置与连接测试** | **高风险操作审批** |
+| ![设置](docs/screenshots/settings.png) | ![审批](docs/screenshots/approval.png) |
+
+---
+
 ## 目录
 
+- [界面预览](#界面预览)
 - [1. 核心特性](#1-核心特性)
 - [2. 界面与工作流](#2-界面与工作流)
 - [3. 快速开始](#3-快速开始)
@@ -80,20 +95,20 @@ Z Desktop 让 AI 在用户授权下观察电脑、理解任务、调用工具、
 
 ### 页面
 
-- **首页**：问候、快捷操作、最近任务、活跃项目。
-- **任务**：任务列表与任务详情（执行时间线 + 对话记录 + 流式思考预览 + 停止按钮）。
-- **文件**：目录树、文件预览、按通配符搜索（如 `*.pdf`）。
+- **首页**：问候、未配置模型引导、快捷操作、最近任务、活跃项目。
+- **任务**：任务列表与任务详情（结构化执行步骤 + 对话记录 + 复制消息 + 流式思考预览 + 停止按钮）。
+- **文件**：目录树、文本 / 图片预览、按通配符搜索（如 `*.pdf`）。
 - **项目**：添加 / 设置活跃项目；Agent 会优先以项目路径作为工作目录。
-- **设置**：LLM Provider、API Key、模型、自动批准策略、`max_steps`。
+- **设置**：LLM Provider、API Key 显示/隐藏、连接测试、模型、自动批准策略、`max_steps`。
 
 ### 一次典型任务
 
-1. 在底部输入任务，例如「整理下载目录里的 PDF」。
+1. 在底部输入任务，例如「整理下载目录里的 PDF」。随时按 `Ctrl/Cmd+K` 聚焦输入框。
 2. Agent 读取工具清单与上下文，调用 LLM 规划下一步。
 3. 工具调用进入 Rust：安全判定 → 直接执行 / 弹审批 / 拦截。
 4. 每一步的输入、输出、状态实时进入 Activity 与 Task Timeline。
 5. LLM 输出最终总结，验证器判定完成后任务结束。
-6. 全程可点击「停止」，终止当前循环与相关进程。
+6. 全程可点击「停止」：立即中断进行中的 LLM 流式请求，并终止相关进程树。
 
 ---
 
@@ -151,7 +166,8 @@ src-tauri/target/release/bundle/msi/*.msi
 1. 选择 Provider。
 2. 填写 API Key（本地模型可留空）。
 3. 按需填写 Base URL 与模型名（留空使用默认值）。
-4. 选择自动批准策略，保存后立即生效。
+4. 点击「测试连接」验证配置（使用当前表单内容，无需先保存）。
+5. 选择自动批准策略，保存后立即生效。
 
 ### 3.5 试试这些任务
 
@@ -261,7 +277,8 @@ LLM 临时失败 → RECOVERING → 重试一次
 | 观察截断 | 单条工具结果最长 4000 字符 |
 | 思考文本 | UI 只保留最近 2000 字符 |
 | 活动流 | 最多保留 300 条 |
-| 停止 | 每步检查取消标志；Shell 以 100ms 轮询取消 |
+| 停止 | 每步检查取消标志；中断进行中的 LLM 请求；Shell 以 100ms 轮询取消 |
+| 步骤落库 | 每次工具调用写入 `task_steps`（输入/输出/状态），供时间线回放 |
 
 ---
 
@@ -308,7 +325,7 @@ LLM 临时失败 → RECOVERING → 重试一次
 
 | 工具 | 风险 | 说明 |
 |---|---|---|
-| `shell.exec` | 动态 | PowerShell / CMD / WSL / Git Bash，支持 cwd、timeout、取消 |
+| `shell.exec` | 动态 | PowerShell / CMD / WSL / Git Bash，支持 cwd、timeout、取消；stdout/stderr 只保留尾部 100KB |
 
 > `shell.exec` 的最终风险由命令内容决定：只读命令可为 SAFE，未知命令 MEDIUM，危险命令 HIGH / CRITICAL。
 
@@ -568,6 +585,7 @@ z-desktop/
 ├── database/migrations/
 │   └── 0001_init.sql               # 8 张业务表 + FTS5 + 触发器
 ├── docs/                           # 架构 / Agent / 工具 / 安全 / 数据库 / 路线图
+│   └── screenshots/                # README 界面截图
 ├── public/                         # 静态资源
 ├── src/                            # Vue 3 前端
 │   ├── agent/
@@ -638,6 +656,7 @@ z-desktop/
 | `npm test` | 前端单元测试 |
 | `npm run test:watch` | 前端测试监听 |
 | `npm run tauri build` | 构建 Windows 安装包 |
+| `cargo fmt --all -- --check` | Rust 格式检查 |
 | `cargo test --all-targets --locked` | Rust 单元 + 集成测试 |
 | `cargo clippy --all-targets --locked -- -D warnings` | Clippy 零警告检查 |
 
@@ -645,9 +664,9 @@ z-desktop/
 
 | 层 | 文件 | 数量 |
 |---|---|---|
-| 前端 | `llm.test.ts` / `verifier.test.ts` / `planner.test.ts` / `registry.test.ts` | 30 |
-| Rust 单元 | security / database / filesystem / shell / agent | 36 |
-| Rust 集成 | `src-tauri/tests/integration.rs` | 20 |
+| 前端 | `llm.test.ts` / `verifier.test.ts` / `planner.test.ts` / `registry.test.ts` / `path.test.ts` | 35 |
+| Rust 单元 | security / database / filesystem / shell / agent | 42 |
+| Rust 集成 | `src-tauri/tests/integration.rs` | 21 |
 
 Rust 集成测试覆盖：文件系统全生命周期、Shell 输出 / 退出码 / 超时 / 取消 / cwd、进程枚举、CRITICAL 拦截、审批 Allow/Deny/Always、审批重放参数校验、任务取消、SQLite CRUD、FTS5 同步、沙箱归一化。
 
@@ -659,7 +678,7 @@ Rust 集成测试覆盖：文件系统全生命周期、Shell 输出 / 退出码
 
 | Job | 运行环境 | 内容 |
 |---|---|---|
-| **Test** | `windows-latest` | 版本一致性 → `typecheck` → 前端单测 → Rust 单测 / 集成测试 → Clippy `-D warnings` |
+| **Test** | `windows-latest` | 版本一致性 → `typecheck` → 前端单测 → Rust 格式检查 → Rust 单测 / 集成测试 → Clippy `-D warnings` |
 | **Build** | `windows-latest` | `tauri build --bundles nsis,msi`，上传 `.exe` / `.msi` artifact |
 | **Release** | `ubuntu-latest` | 读取版本号 → 检查 tag → 生成 SHA256 → 创建 tag / GitHub Release |
 
@@ -754,6 +773,7 @@ A：设置页 `max_steps` 支持 1–200，默认 30。
 ```bash
 npm run typecheck
 npm test
+cargo fmt --all -- --check
 cargo test --all-targets --locked
 cargo clippy --all-targets --locked -- -D warnings
 ```

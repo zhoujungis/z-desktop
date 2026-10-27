@@ -70,6 +70,27 @@ impl AppState {
         self.cancelled_tasks.lock().unwrap().contains(task_id)
     }
 
+    /// 任务进入终态后清理运行态数据，避免取消标志 / PID / 审批请求无限累积。
+    pub fn finish_task(&self, task_id: &str) {
+        self.cancelled_tasks.lock().unwrap().remove(task_id);
+        self.running_pids.lock().unwrap().remove(task_id);
+        let stale: Vec<String> = {
+            let mut map = self.pending_approvals.lock().unwrap();
+            let ids: Vec<String> = map
+                .iter()
+                .filter(|(_, st)| st.request.task_id.as_deref() == Some(task_id))
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in &ids {
+                map.remove(id);
+            }
+            ids
+        };
+        for id in stale {
+            self.emit_approval_resolved(&id, "deny");
+        }
+    }
+
     /// 记录并广播 Activity 事件（设计文档 #13：用户必须能够知道 AI 当前在做什么）
     pub fn emit_activity(
         &self,
@@ -131,24 +152,20 @@ pub fn tool_risk(tool: &str) -> RiskLevel {
     match tool {
         // SAFE：读取类
         "filesystem.list" | "filesystem.read" | "filesystem.search" | "filesystem.stat"
-        | "process.list" | "process.inspect"
-        | "window.list" | "window.find"
-        | "ui.inspect" | "ui.find" | "ui.getValue" | "ui.getText"
-        | "browser.goto" | "browser.back" | "browser.forward" | "browser.search"
-        | "browser.scroll" | "browser.extract" | "browser.screenshot"
-        | "screenshot.full" | "screenshot.window" | "screenshot.region"
+        | "process.list" | "process.inspect" | "window.list" | "window.find" | "ui.inspect"
+        | "ui.find" | "ui.getValue" | "ui.getText" | "browser.goto" | "browser.back"
+        | "browser.forward" | "browser.search" | "browser.scroll" | "browser.extract"
+        | "browser.screenshot" | "screenshot.full" | "screenshot.window" | "screenshot.region"
         | "clipboard.read" => RiskLevel::Safe,
         // LOW：创建 / 复制 / 重命名 / 打开应用
-        "filesystem.mkdir" | "filesystem.copy" | "filesystem.rename"
-        | "process.start"
-        | "window.focus" | "window.minimize" | "window.maximize"
-        | "browser.open"
+        "filesystem.mkdir" | "filesystem.copy" | "filesystem.rename" | "process.start"
+        | "window.focus" | "window.minimize" | "window.maximize" | "browser.open"
         | "clipboard.write" => RiskLevel::Low,
         // MEDIUM：修改 / 操作类
-        "filesystem.write" | "filesystem.move" | "window.close"
-        | "ui.click" | "ui.type" | "ui.select"
-        | "browser.click" | "browser.type" | "browser.download"
-        | "shell.exec" => RiskLevel::Medium,
+        "filesystem.write" | "filesystem.move" | "window.close" | "ui.click" | "ui.type"
+        | "ui.select" | "browser.click" | "browser.type" | "browser.download" | "shell.exec" => {
+            RiskLevel::Medium
+        }
         // HIGH：删除 / 终止进程
         "filesystem.delete" | "process.kill" => RiskLevel::High,
         _ => RiskLevel::Medium,

@@ -5,8 +5,25 @@ import { useAgentStore } from "@/stores/agent";
 import { toolMetaOf } from "@/tools/registry";
 
 const agent = useAgentStore();
-const collapsed = ref(false);
+const COLLAPSE_KEY = "z-desktop:activity-collapsed";
+const collapsed = ref(readCollapsed());
 const listRef = ref<HTMLElement | null>(null);
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+watch(collapsed, (value) => {
+  try {
+    localStorage.setItem(COLLAPSE_KEY, value ? "1" : "0");
+  } catch {
+    // localStorage 不可用时忽略
+  }
+});
 
 function metaOf(tool: string | undefined) {
   return toolMetaOf(tool);

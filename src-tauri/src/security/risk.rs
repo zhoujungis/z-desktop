@@ -282,7 +282,10 @@ mod tests {
         assert_eq!(classify_command("git status"), RiskLevel::Safe);
         assert_eq!(classify_command("npm --version"), RiskLevel::Safe);
         assert_eq!(classify_command("node -v"), RiskLevel::Safe);
-        assert_eq!(classify_command("Get-ChildItem D:\\Downloads"), RiskLevel::Safe);
+        assert_eq!(
+            classify_command("Get-ChildItem D:\\Downloads"),
+            RiskLevel::Safe
+        );
         assert_eq!(classify_command("dir C:\\Users"), RiskLevel::Safe);
         assert_eq!(classify_command("cargo check"), RiskLevel::Safe);
         assert_eq!(classify_command("tasklist"), RiskLevel::Safe);
@@ -298,10 +301,19 @@ mod tests {
 
     #[test]
     fn high_commands() {
-        assert_eq!(classify_command("Remove-Item D:\\temp\\a.txt"), RiskLevel::High);
+        assert_eq!(
+            classify_command("Remove-Item D:\\temp\\a.txt"),
+            RiskLevel::High
+        );
         assert_eq!(classify_command("del /f /q a.txt"), RiskLevel::High);
-        assert_eq!(classify_command("taskkill /f /im notepad.exe"), RiskLevel::High);
-        assert_eq!(classify_command("reg delete HKLM\\Software\\X"), RiskLevel::Critical);
+        assert_eq!(
+            classify_command("taskkill /f /im notepad.exe"),
+            RiskLevel::High
+        );
+        assert_eq!(
+            classify_command("reg delete HKLM\\Software\\X"),
+            RiskLevel::Critical
+        );
         assert_eq!(classify_command("rm -rf build"), RiskLevel::High);
     }
 
@@ -309,7 +321,10 @@ mod tests {
     fn critical_commands() {
         assert_eq!(classify_command("format C:"), RiskLevel::Critical);
         assert_eq!(classify_command("shutdown /s /t 0"), RiskLevel::Critical);
-        assert_eq!(classify_command("Set-MpPreference -DisableRealtimeMonitoring $true"), RiskLevel::Critical);
+        assert_eq!(
+            classify_command("Set-MpPreference -DisableRealtimeMonitoring $true"),
+            RiskLevel::Critical
+        );
         assert_eq!(classify_command("mkfs.ext4 /dev/sda1"), RiskLevel::Critical);
     }
 
@@ -324,11 +339,26 @@ mod tests {
     #[test]
     fn chained_destructive_commands_are_not_safe() {
         // 安全命令 + 危险命令：整体必须按最高风险处理
-        assert_eq!(classify_command("echo ok && rm -rf ./build"), RiskLevel::High);
-        assert_eq!(classify_command("cd D:\\ && del important.txt"), RiskLevel::High);
-        assert_eq!(classify_command("git status; git clean -fdx"), RiskLevel::High);
-        assert_eq!(classify_command("dir | Remove-Item -Recurse"), RiskLevel::High);
-        assert_eq!(classify_command("echo hi & shutdown /s"), RiskLevel::Critical);
+        assert_eq!(
+            classify_command("echo ok && rm -rf ./build"),
+            RiskLevel::High
+        );
+        assert_eq!(
+            classify_command("cd D:\\ && del important.txt"),
+            RiskLevel::High
+        );
+        assert_eq!(
+            classify_command("git status; git clean -fdx"),
+            RiskLevel::High
+        );
+        assert_eq!(
+            classify_command("dir | Remove-Item -Recurse"),
+            RiskLevel::High
+        );
+        assert_eq!(
+            classify_command("echo hi & shutdown /s"),
+            RiskLevel::Critical
+        );
         // 管道只读命令仍是 SAFE
         assert_eq!(classify_command("dir | findstr foo"), RiskLevel::Safe);
         assert_eq!(classify_command("git status && git log"), RiskLevel::Safe);

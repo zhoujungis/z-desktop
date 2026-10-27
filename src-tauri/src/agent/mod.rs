@@ -4,7 +4,7 @@
 //! LLM 规划与 Agent Loop 由前端驱动（见 src/agent/loop.ts）。
 
 use crate::security::permission;
-use crate::state::{ApprovalState, AppState, PendingApproval};
+use crate::state::{AppState, ApprovalState, PendingApproval};
 use serde_json::{json, Value};
 use std::time::Instant;
 
@@ -16,10 +16,7 @@ fn same_request(stored: &PendingApproval, tool: &str, input: &Value) -> bool {
 fn summarize(tool: &str, input: &Value) -> String {
     match tool {
         "shell.exec" => {
-            let cmd = input
-                .get("command")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let cmd = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
             truncate_text(&format!("执行命令: {cmd}"), 140)
         }
         "filesystem.read" | "filesystem.list" | "filesystem.stat" => {
@@ -35,8 +32,16 @@ fn summarize(tool: &str, input: &Value) -> String {
             truncate_text(&format!("删除 {p}"), 140)
         }
         "filesystem.move" | "filesystem.copy" | "filesystem.rename" => {
-            let f = input.get("from").or_else(|| input.get("path")).and_then(|v| v.as_str()).unwrap_or("?");
-            let t = input.get("to").or_else(|| input.get("new_name")).and_then(|v| v.as_str()).unwrap_or("?");
+            let f = input
+                .get("from")
+                .or_else(|| input.get("path"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let t = input
+                .get("to")
+                .or_else(|| input.get("new_name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
             truncate_text(&format!("{tool}: {f} → {t}"), 140)
         }
         "process.start" => {
@@ -61,6 +66,44 @@ fn truncate_text(s: &str, max: usize) -> String {
     }
     let cut: String = s.chars().take(max).collect();
     format!("{cut}…")
+}
+
+const STEP_INPUT_LIMIT: usize = 4_000;
+const STEP_OUTPUT_LIMIT: usize = 8_000;
+
+/// 记录一次工具步骤；返回 step id 供完成时更新状态。
+fn record_step(
+    state: &AppState,
+    task_id: Option<&str>,
+    tool: &str,
+    input: &Value,
+    status: &str,
+    output: Option<&str>,
+) -> Option<String> {
+    let task_id = task_id?;
+    let input_text = truncate_text(&input.to_string(), STEP_INPUT_LIMIT);
+    let output_text = output.map(|o| truncate_text(o, STEP_OUTPUT_LIMIT));
+    let conn = state.db.lock().unwrap();
+    crate::database::models::append_step(
+        &conn,
+        task_id,
+        Some(tool),
+        Some(&input_text),
+        output_text.as_deref(),
+        status,
+    )
+    .ok()
+    .map(|step| step.id)
+}
+
+fn finish_step(state: &AppState, step_id: Option<&str>, status: &str, output: Option<&str>) {
+    let Some(step_id) = step_id else {
+        return;
+    };
+    let output_text = output.map(|o| truncate_text(o, STEP_OUTPUT_LIMIT));
+    let conn = state.db.lock().unwrap();
+    let _ =
+        crate::database::models::update_step_status(&conn, step_id, status, output_text.as_deref());
 }
 
 /// 工具执行请求（Agent Loop 的每一步都经过这里）
@@ -117,6 +160,14 @@ pub async fn request_tool_execution(
             )
         };
         if decision.blocked {
+            record_step(
+                state,
+                task_id,
+                tool,
+                &input,
+                "blocked",
+                Some(decision.reason.as_str()),
+            );
             state.emit_activity(
                 task_id,
                 "tool_blocked",
@@ -169,6 +220,7 @@ pub async fn request_tool_execution(
 
     // 3. 执行工具
     let started = Instant::now();
+    let step_id = record_step(state, task_id, tool, &input, "running", None);
     state.emit_activity(
         task_id,
         "tool_started",
@@ -181,16 +233,24 @@ pub async fn request_tool_execution(
 
     match result {
         Ok(value) => {
+            let value_text = value.to_string();
+            let cancelled = value
+                .get("cancelled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let step_status = if cancelled { "cancelled" } else { "completed" };
+            finish_step(state, step_id.as_deref(), step_status, Some(&value_text));
             state.emit_activity(
                 task_id,
                 "tool_completed",
                 Some(tool),
                 &format!("{tool} 完成（{duration}ms）"),
-                Some(&truncate_text(&value.to_string(), 2000)),
+                Some(&truncate_text(&value_text, 2000)),
             );
             Ok(json!({ "status": "executed", "result": value, "durationMs": duration }))
         }
         Err(e) => {
+            finish_step(state, step_id.as_deref(), "failed", Some(&e));
             state.emit_activity(
                 task_id,
                 "tool_failed",
@@ -240,7 +300,11 @@ pub fn resolve_approval(
 
 /// 用户停止任务（设计文档 #40）：置取消标志 + 终止该任务启动的进程树
 pub fn cancel_task(state: &AppState, task_id: &str) -> Result<Value, String> {
-    state.cancelled_tasks.lock().unwrap().insert(task_id.to_string());
+    state
+        .cancelled_tasks
+        .lock()
+        .unwrap()
+        .insert(task_id.to_string());
 
     // 清理该任务尚未处理的审批请求，并通知等待方，避免审批卡片残留 / 表泄漏
     let stale: Vec<String> = {
@@ -304,7 +368,7 @@ fn kill_tree(pid: u32) {
 mod tests {
     use super::*;
     use crate::database::migrations;
-    use crate::state::{ApprovalState, AppState, PendingApproval};
+    use crate::state::{AppState, ApprovalState, PendingApproval};
 
     fn setup() -> AppState {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -355,5 +419,30 @@ mod tests {
         let map = state.pending_approvals.lock().unwrap();
         assert!(!map.contains_key("r3"), "被取消任务的审批应清理");
         assert!(map.contains_key("r4"), "其他任务的审批应保留");
+    }
+
+    #[test]
+    fn finish_task_cleans_runtime_state() {
+        let state = setup();
+        state
+            .cancelled_tasks
+            .lock()
+            .unwrap()
+            .insert("task-a".into());
+        state
+            .running_pids
+            .lock()
+            .unwrap()
+            .insert("task-a".into(), vec![1234]);
+        insert_pending(&state, "r5", Some("task-a"));
+        insert_pending(&state, "r6", Some("task-b"));
+
+        state.finish_task("task-a");
+
+        assert!(!state.cancelled_tasks.lock().unwrap().contains("task-a"));
+        assert!(!state.running_pids.lock().unwrap().contains_key("task-a"));
+        let map = state.pending_approvals.lock().unwrap();
+        assert!(!map.contains_key("r5"));
+        assert!(map.contains_key("r6"), "其他任务不受影响");
     }
 }

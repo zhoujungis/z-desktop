@@ -7,7 +7,8 @@
 - 引擎：SQLite（rusqlite `bundled`，编译期内置，**自带 FTS5**）。
 - 模式：WAL（读写并发）；文件：`{app_data_dir}/zdesktop.db`。
 - 主键统一 TEXT（UUID v4）；时间统一 INTEGER（Unix 毫秒）。
-- 迁移机制：`migrations.rs` 顺序执行内嵌 SQL，幂等（`IF NOT EXISTS`），版本记录在 `schema_migrations` 表。
+- 迁移机制：`migrations.rs` 顺序执行内嵌 SQL，幂等（`IF NOT EXISTS`），版本记录在 `schema_migrations` 表；
+  SQL 执行与版本写入在同一事务内，中途失败不会留下半成品 schema。
 
 ## 2. 表结构（8 张业务表 + FTS5 虚拟表）
 
@@ -83,6 +84,8 @@ CREATE VIRTUAL TABLE memories_fts USING fts5(content, content='memories', conten
 
 `search_memories` 会先把用户输入里的 FTS5 控制字符替换为空格，再按词加引号拼接
 （`alpha:beta` → `"alpha" OR "beta"`），避免 `*`、`"`、`OR` 等输入让 MATCH 报错。
+
+设置写入前会做归一化：`max_steps` 限制在 1–200，空 provider 回退 `openai`，保证持久化值与内存值一致。
 
 ## 4. 演进方向（v0.2+）
 

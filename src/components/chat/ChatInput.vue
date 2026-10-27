@@ -89,6 +89,7 @@ defineExpose({ focus });
         rows="1"
         class="input max-h-40 flex-1 resize-none border-0 bg-transparent px-2 py-1.5 focus:ring-0"
         placeholder="让 Z 帮你做点什么…（Enter 发送，Shift+Enter 换行）"
+        title="Ctrl/Cmd+K 聚焦输入框"
         @input="autoResize"
         @keydown="onKeydown"
       />

@@ -11,10 +11,13 @@ import { verify } from "./verifier";
 // ---------- Stop 控制（设计文档 #40） ----------
 
 let stopRequested = false;
+/** 当前任务的 LLM 请求控制器：停止时中断进行中的流式请求 */
+let activeAbort: AbortController | null = null;
 
-/** 请求停止当前 Loop（store.stop() 调用），下一次循环检测到即退出 */
+/** 请求停止当前 Loop（store.stop() 调用）：置标志并中断正在进行的 LLM 请求 */
 export function requestStop(): void {
   stopRequested = true;
+  activeAbort?.abort();
 }
 
 // ---------- 观察结果 ----------
@@ -48,6 +51,8 @@ export async function runTask(taskId: string, userPrompt: string): Promise<void>
   const agent = useAgentStore();
   const settingsStore = useSettingsStore();
   stopRequested = false;
+  const abort = new AbortController();
+  activeAbort = abort;
 
   if (!settingsStore.loaded) await settingsStore.loadOrDefault();
   const settings = settingsStore.settings;
@@ -84,9 +89,13 @@ export async function runTask(taskId: string, userPrompt: string): Promise<void>
       let res;
       try {
         agent.thinkingText = "";
-        res = await llm.chatStream(messages, llmTools, (d) => agent.appendThinking(d));
+        res = await llm.chatStream(messages, llmTools, (d) => agent.appendThinking(d), abort.signal);
       } catch (e) {
-        if (llmRetried || stopRequested) throw e;
+        if (stopRequested || abort.signal.aborted) {
+          cancelled = true;
+          break;
+        }
+        if (llmRetried) throw e;
         llmRetried = true;
         agent.setState("RECOVERING");
         messages.push({
@@ -157,8 +166,16 @@ export async function runTask(taskId: string, userPrompt: string): Promise<void>
 
       // 4b. 纯文本输出 → 验证
       const summary = res.text ?? "";
+      if (stopRequested || abort.signal.aborted) {
+        cancelled = true;
+        break;
+      }
       agent.setState("VERIFYING");
-      const verdict = await verify(llm, userPrompt, summary);
+      const verdict = await verify(llm, userPrompt, summary, abort.signal);
+      if (stopRequested || abort.signal.aborted) {
+        cancelled = true;
+        break;
+      }
       if (verdict.passed) {
         await api.saveMessage(taskId, "assistant", summary);
         await safeUpdateStatus(taskId, "completed");
@@ -205,5 +222,7 @@ export async function runTask(taskId: string, userPrompt: string): Promise<void>
     } catch {
       // 消息保存失败忽略
     }
+  } finally {
+    if (activeAbort === abort) activeAbort = null;
   }
 }

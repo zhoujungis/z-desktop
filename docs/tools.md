@@ -37,7 +37,7 @@
 
 实现要点（`tools/shell.rs`）：
 
-- 独立线程读取 stdout/stderr 管道，UTF-8 边界安全截断（保留尾部 100KB）。
+- 独立线程读取 stdout/stderr 管道，使用有界尾部缓冲（只保留最近 100KB），避免大输出占满内存；UTF-8 边界安全截断。
 - 等待退出最多 2s 冲刷剩余输出；超时/取消时杀进程树。
 - 返回 `{exitCode, stdout, stderr, duration, timedOut, cancelled, pid}`；子进程 PID 登记到 `running_pids` 供取消。
 - 非 Windows 环境映射到 `/bin/sh`。

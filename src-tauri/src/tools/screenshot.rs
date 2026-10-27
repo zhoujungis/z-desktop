@@ -1,11 +1,15 @@
 //! screenshot.* 工具（设计文档 #25）：全屏 / 区域 / 窗口截图，保存到应用数据目录
 
 use super::registry::{param_i64, param_str, param_u64};
+use screenshots::Screen;
 use serde_json::{json, Value};
 use std::path::Path;
-use screenshots::Screen;
 
-fn save_png(img: screenshots::image::RgbaImage, data_dir: &Path, kind: &str) -> Result<Value, String> {
+fn save_png(
+    img: screenshots::image::RgbaImage,
+    data_dir: &Path,
+    kind: &str,
+) -> Result<Value, String> {
     let dir = data_dir.join("screenshots");
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建截图目录失败: {e}"))?;
     let ts = chrono::Local::now().format("%Y%m%d-%H%M%S%3f");

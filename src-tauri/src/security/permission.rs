@@ -135,7 +135,13 @@ mod tests {
     fn medium_requires_approval_by_default() {
         let conn = setup();
         let settings = AppSettings::default();
-        let d = decide(&conn, &settings, "shell.exec", RiskLevel::Medium, r#"{"command":"npm test"}"#);
+        let d = decide(
+            &conn,
+            &settings,
+            "shell.exec",
+            RiskLevel::Medium,
+            r#"{"command":"npm test"}"#,
+        );
         assert!(d.requires_approval);
         assert_eq!(d.risk_level, "medium");
     }
@@ -144,7 +150,13 @@ mod tests {
     fn shell_critical_blocked() {
         let conn = setup();
         let settings = AppSettings::default();
-        let d = decide(&conn, &settings, "shell.exec", RiskLevel::Medium, r#"{"command":"format C:"}"#);
+        let d = decide(
+            &conn,
+            &settings,
+            "shell.exec",
+            RiskLevel::Medium,
+            r#"{"command":"format C:"}"#,
+        );
         assert!(d.blocked);
         assert_eq!(d.risk_level, "critical");
     }
@@ -154,7 +166,13 @@ mod tests {
         let conn = setup();
         let settings = AppSettings::default();
         save_allow_rule(&conn, "filesystem.delete", r#"{"path":"D:/a.txt"}"#).unwrap();
-        let d = decide(&conn, &settings, "filesystem.delete", RiskLevel::High, r#"{"path":"D:/a.txt"}"#);
+        let d = decide(
+            &conn,
+            &settings,
+            "filesystem.delete",
+            RiskLevel::High,
+            r#"{"path":"D:/a.txt"}"#,
+        );
         assert!(d.requires_approval);
     }
 
@@ -176,7 +194,13 @@ mod tests {
             ..AppSettings::default()
         };
         let safe_input = r#"{"command":"git status"}"#;
-        let d = decide(&conn, &settings, "shell.exec", RiskLevel::Medium, safe_input);
+        let d = decide(
+            &conn,
+            &settings,
+            "shell.exec",
+            RiskLevel::Medium,
+            safe_input,
+        );
         assert!(!d.requires_approval, "默认应自动执行只读命令");
         assert_eq!(d.risk_level, "safe");
 
@@ -184,7 +208,13 @@ mod tests {
             shell_safe_auto_exec: false,
             ..AppSettings::default()
         };
-        let d = decide(&conn, &settings, "shell.exec", RiskLevel::Medium, safe_input);
+        let d = decide(
+            &conn,
+            &settings,
+            "shell.exec",
+            RiskLevel::Medium,
+            safe_input,
+        );
         assert!(d.requires_approval, "关闭开关后只读命令也应审批");
         // 非 shell 的 SAFE 工具不受该开关影响
         let d2 = decide(&conn, &settings, "filesystem.read", RiskLevel::Safe, "{}");

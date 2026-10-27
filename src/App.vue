@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, watch } from "vue";
+import { onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import ActivityPanel from "@/components/activity/ActivityPanel.vue";
 import ApprovalCard from "@/components/approval/ApprovalCard.vue";
@@ -15,6 +15,7 @@ const agent = useAgentStore();
 const taskStore = useTaskStore();
 const workspace = useWorkspaceStore();
 const settingsStore = useSettingsStore();
+const chatRef = ref<{ focus: () => void } | null>(null);
 
 const navItems = [
   { to: "/", label: "首页" },
@@ -33,6 +34,14 @@ async function handleSend(text: string) {
   await agent.startTask(text);
 }
 
+// Ctrl/Cmd+K：随时聚焦底部任务输入框
+function onGlobalKeydown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    chatRef.value?.focus();
+  }
+}
+
 // 任务创建后自动跳转到任务页
 watch(
   () => agent.currentTaskId,
@@ -47,9 +56,11 @@ onMounted(() => {
   void settingsStore.loadOrDefault();
   void taskStore.loadTasksSafe();
   void workspace.loadProjectsSafe();
+  window.addEventListener("keydown", onGlobalKeydown);
 });
 
 onUnmounted(() => {
+  window.removeEventListener("keydown", onGlobalKeydown);
   agent.dispose();
   taskStore.dispose();
 });
@@ -97,7 +108,7 @@ onUnmounted(() => {
         <router-view />
       </div>
       <div class="px-6 pb-5 pt-3">
-        <ChatInput @send="handleSend" />
+        <ChatInput ref="chatRef" @send="handleSend" />
       </div>
     </main>
 

@@ -5,6 +5,7 @@ import FileViewer from "@/components/files/FileViewer.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import { api, type FsEntry } from "@/services/api";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { parentPath } from "@/utils/path";
 
 const workspace = useWorkspaceStore();
 
@@ -35,16 +36,8 @@ function go() {
   currentPath.value = p;
 }
 
-function parentOf(p: string): string {
-  const trimmed = p.replace(/[\\/]+$/, "");
-  const idx = Math.max(trimmed.lastIndexOf("\\"), trimmed.lastIndexOf("/"));
-  if (idx < 0) return "/";
-  if (idx === 0) return trimmed[0] === "/" ? "/" : trimmed.slice(0, 1);
-  return trimmed.slice(0, idx) || "/";
-}
-
 function goUp() {
-  pathInput.value = parentOf(currentPath.value);
+  pathInput.value = parentPath(currentPath.value);
   go();
 }
 

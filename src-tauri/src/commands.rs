@@ -94,6 +94,9 @@ pub async fn update_task_status(
         let conn = state.db.lock().unwrap();
         models::get_task(&conn, &id)?.ok_or_else(|| format!("任务 {id} 不存在"))?
     };
+    if matches!(status.as_str(), "completed" | "failed" | "cancelled") {
+        state.finish_task(&id);
+    }
     state.emit_task_updated(&task);
     Ok(task)
 }
@@ -215,6 +218,7 @@ pub async fn save_settings(
     state: State<'_, AppState>,
     settings: AppSettings,
 ) -> Result<(), String> {
+    let settings = settings.normalized();
     {
         let conn = state.db.lock().unwrap();
         models::save_settings(&conn, &settings)?;

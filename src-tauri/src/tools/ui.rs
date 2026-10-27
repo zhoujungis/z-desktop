@@ -13,7 +13,9 @@ mod imp {
         automation, center_point, element_info, find_element, resolve_root,
     };
     use uiautomation::inputs::{Keyboard, Mouse};
-    use uiautomation::patterns::{UIInvokePattern, UISelectionItemPattern, UITextPattern, UIValuePattern};
+    use uiautomation::patterns::{
+        UIInvokePattern, UISelectionItemPattern, UITextPattern, UIValuePattern,
+    };
 
     pub fn inspect(input: &Value) -> Result<Value, String> {
         let auto = automation()?;
@@ -37,7 +39,10 @@ mod imp {
     }
 
     /// 从工具入参提取定位条件
-    fn locate(auto: &uiautomation::core::UIAutomation, input: &Value) -> Result<uiautomation::core::UIElement, String> {
+    fn locate(
+        auto: &uiautomation::core::UIAutomation,
+        input: &Value,
+    ) -> Result<uiautomation::core::UIElement, String> {
         find_element(
             auto,
             param_str(input, "window"),
@@ -73,7 +78,8 @@ mod imp {
         let auto = automation()?;
         let e = locate(&auto, input)?;
         let info = element_info(&e);
-        e.set_focus().map_err(|err| format!("聚焦控件失败: {err}"))?;
+        e.set_focus()
+            .map_err(|err| format!("聚焦控件失败: {err}"))?;
         if clear {
             if let Ok(vp) = e.get_pattern::<UIValuePattern>() {
                 let _ = vp.set_value("");

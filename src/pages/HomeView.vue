@@ -5,6 +5,7 @@ import EmptyState from "@/components/common/EmptyState.vue";
 import SectionCard from "@/components/common/SectionCard.vue";
 import TaskList from "@/components/task/TaskList.vue";
 import { useAgentStore } from "@/stores/agent";
+import { useSettingsStore } from "@/stores/settings";
 import { useTaskStore } from "@/stores/task";
 import { useWorkspaceStore } from "@/stores/workspace";
 
@@ -12,6 +13,14 @@ const router = useRouter();
 const agent = useAgentStore();
 const taskStore = useTaskStore();
 const workspace = useWorkspaceStore();
+const settingsStore = useSettingsStore();
+
+const needsConfig = computed(
+  () =>
+    settingsStore.loaded &&
+    settingsStore.settings.provider !== "local" &&
+    !settingsStore.settings.api_key,
+);
 
 const greeting = computed(() => {
   const h = new Date().getHours();
@@ -66,6 +75,22 @@ onMounted(() => {
     <div>
       <h1 class="text-2xl font-semibold text-zinc-100">{{ greeting }}，我是 Z</h1>
       <p class="mt-1 text-sm text-zinc-500">告诉我你想做什么，我会在这台电脑上替你完成。</p>
+    </div>
+
+    <!-- 未配置模型提示 -->
+    <div
+      v-if="needsConfig"
+      class="card flex flex-wrap items-center justify-between gap-3 border-warn/40 bg-warn/5 px-4 py-3"
+    >
+      <div class="min-w-0">
+        <div class="text-sm font-medium text-warn">还没有配置模型</div>
+        <p class="mt-0.5 text-xs text-zinc-500">
+          前往设置填写 API Key 与模型后，即可开始让 Z 执行任务。
+        </p>
+      </div>
+      <button type="button" class="btn-primary shrink-0 text-xs" @click="router.push('/settings')">
+        去设置
+      </button>
     </div>
 
     <!-- Quick Actions -->

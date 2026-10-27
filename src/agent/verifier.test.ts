@@ -56,4 +56,18 @@ describe("verify", () => {
     expect(result.passed).toBe(true);
     expect(result.reason).toContain("network down");
   });
+
+  it("rethrows the abort error instead of treating it as passed", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const llm: LlmClient = {
+      chat: vi.fn(async () => {
+        throw new Error("Request cancelled");
+      }),
+      chatStream: vi.fn(async () => ({ text: null, toolCalls: [] })),
+    };
+    await expect(verify(llm, "task", "output", controller.signal)).rejects.toThrow(
+      "Request cancelled",
+    );
+  });
 });

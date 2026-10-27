@@ -29,7 +29,7 @@ EXECUTING ── 需审批 ──→ WAITING_APPROVAL ── Allow ──→ EXE
 3. **EXECUTING**：逐个调用 `invoke("tool_execute", { tool, input, taskId, approvalRequestId })`。
    - Rust 返回五种 status：`executed` / `approval_required` / `blocked` / `failed` / `cancelled`。
    - `approval_required`：前端显示 ApprovalCard，用 Promise 挂起等待 `approval-resolved` 事件。
-4. **OBSERVING**：把工具输出追加到消息历史与 Task Steps，推送 Activity。
+4. **OBSERVING**：把工具输出追加到消息历史，写入 `task_steps`（running → completed / failed / blocked / cancelled），并推送 Activity。
 5. **VERIFYING**：再调一次 LLM 判断目标是否已达成。
 
 ### 保护机制
@@ -38,7 +38,7 @@ EXECUTING ── 需审批 ──→ WAITING_APPROVAL ── Allow ──→ EXE
 |---|---|
 | max_steps | 默认 30 步上限（可配置 1–200），防止死循环 |
 | LLM 失败重试 | 网络等临时错误重试一次 |
-| Stop 检查 | 每步循环前检查取消标志；审批等待同时支持 deny 唤醒与取消唤醒 |
+| Stop 检查 | 每步循环前检查取消标志；中断进行中的 LLM 流式请求；审批等待同时支持 deny 唤醒与取消唤醒 |
 | CRITICAL 拦截 | Rust 侧直接返回 `blocked`，Loop 记录并继续/终止 |
 
 ## 3. 规划（planner.ts）
@@ -85,8 +85,10 @@ tool_execute ─→ permission.decide()
 
 - 置 `cancelled_tasks` 标志（Loop 每步检查）。
 - 取出该任务的 `running_pids`，逐个杀进程树（Windows：`taskkill /PID x /T /F`）。
+- 前端 `requestStop()` 会中止当前 LLM 请求（AbortController），避免停止后仍等待流式响应。
 - Shell 工具内部以 100ms 轮询取消标志，命中后 kill 子进程并返回 `cancelled`。
 - 审批等待中的任务：deny 唤醒 + 状态标记取消。
+- 任务进入终态后清理取消标志、运行中 PID 与残留审批请求。
 
 ## 8. 记忆（Memory）
 

@@ -38,26 +38,32 @@ export interface ChatResult {
 export type OnDelta = (delta: string) => void;
 
 export interface LlmClient {
-  chat(messages: ChatMessage[], tools: LlmTool[]): Promise<ChatResult>;
-  chatStream(messages: ChatMessage[], tools: LlmTool[], onDelta: OnDelta): Promise<ChatResult>;
+  chat(messages: ChatMessage[], tools: LlmTool[], signal?: AbortSignal): Promise<ChatResult>;
+  chatStream(
+    messages: ChatMessage[],
+    tools: LlmTool[],
+    onDelta: OnDelta,
+    signal?: AbortSignal,
+  ): Promise<ChatResult>;
 }
 
 // ---------- HTTP 基础 ----------
 
-async function httpRaw(
-  url: string,
-  init: { method: string; headers: Record<string, string>; body: string },
-): Promise<Response> {
+interface HttpInit {
+  method: string;
+  headers: Record<string, string>;
+  body: string;
+  signal?: AbortSignal;
+}
+
+async function httpRaw(url: string, init: HttpInit): Promise<Response> {
   if (!isTauri()) {
     throw new Error("浏览器开发模式下无法发起 LLM 请求，请在 Tauri 桌面应用中运行");
   }
   return tauriFetch(url, init);
 }
 
-async function httpJson(
-  url: string,
-  init: { method: string; headers: Record<string, string>; body: string },
-): Promise<unknown> {
+async function httpJson(url: string, init: HttpInit): Promise<unknown> {
   const resp = await httpRaw(url, init);
   const raw = await resp.text();
   let data: unknown = null;
@@ -74,11 +80,7 @@ async function httpJson(
   return data;
 }
 
-async function httpStream(
-  url: string,
-  init: { method: string; headers: Record<string, string>; body: string },
-  label: string,
-): Promise<Response> {
+async function httpStream(url: string, init: HttpInit, label: string): Promise<Response> {
   const resp = await httpRaw(url, init);
   if (!resp.ok) {
     const raw = await resp.text().catch(() => "");
@@ -178,6 +180,7 @@ async function openAiCompatibleChat(
   messages: ChatMessage[],
   tools: LlmTool[],
   onDelta?: OnDelta,
+  signal?: AbortSignal,
 ): Promise<ChatResult> {
   const apiKey = requireApiKey(settings);
   const url = `${baseUrlOf(settings, fallbackBaseUrl(settings.provider))}/chat/completions`;
@@ -209,18 +212,20 @@ async function openAiCompatibleChat(
   }
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (apiKey) headers.authorization = `Bearer ${apiKey}`;
-  const init = {
+  const init: HttpInit = {
     method: "POST",
     headers,
     body: JSON.stringify(body),
+    signal,
   };
 
   // 流式分支（SSE）
   if (onDelta) {
-    const streamInit = {
+    const streamInit: HttpInit = {
       method: "POST",
       headers: init.headers,
       body: JSON.stringify({ ...body, stream: true }),
+      signal,
     };
     const resp = await httpStream(url, streamInit, "OpenAI 兼容");
     let text: string | null = null;
@@ -286,6 +291,7 @@ async function anthropicChat(
   messages: ChatMessage[],
   tools: LlmTool[],
   onDelta?: OnDelta,
+  signal?: AbortSignal,
 ): Promise<ChatResult> {
   const apiKey = requireApiKey(settings);
   let base = baseUrlOf(settings, "https://api.anthropic.com");
@@ -340,7 +346,7 @@ async function anthropicChat(
     }));
   }
 
-  const init = {
+  const init: HttpInit = {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -348,14 +354,16 @@ async function anthropicChat(
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify(body),
+    signal,
   };
 
   // 流式分支（SSE：content_block_delta / content_block_start）
   if (onDelta) {
-    const streamInit = {
+    const streamInit: HttpInit = {
       method: "POST",
       headers: init.headers,
       body: JSON.stringify({ ...body, stream: true }),
+      signal,
     };
     const resp = await httpStream(url, streamInit, "Anthropic");
     let text: string | null = null;
@@ -475,6 +483,7 @@ async function geminiChat(
   settings: AppSettings,
   messages: ChatMessage[],
   tools: LlmTool[],
+  signal?: AbortSignal,
 ): Promise<ChatResult> {
   const url = geminiUrl(settings, false);
   const body = buildGeminiBody(messages, tools);
@@ -484,6 +493,7 @@ async function geminiChat(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+      signal,
     }),
   );
 
@@ -514,12 +524,18 @@ async function geminiStreamResult(
   body: Record<string, unknown>,
   url: string,
   onDelta: OnDelta,
+  signal?: AbortSignal,
 ): Promise<ChatResult> {
-  const resp = await httpStream(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  }, "Gemini");
+  const resp = await httpStream(
+    url,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    },
+    "Gemini",
+  );
   let text: string | null = null;
   const toolCalls: ToolCall[] = [];
   for await (const chunk of sseData(resp)) {
@@ -552,20 +568,22 @@ export function createLlmClient(settings: AppSettings): LlmClient {
   switch (settings.provider) {
     case "anthropic":
       return {
-        chat: (m, t) => anthropicChat(settings, m, t),
-        chatStream: (m, t, onDelta) => anthropicChat(settings, m, t, onDelta),
+        chat: (m, t, signal) => anthropicChat(settings, m, t, undefined, signal),
+        chatStream: (m, t, onDelta, signal) =>
+          anthropicChat(settings, m, t, onDelta, signal),
       };
     case "gemini":
       return {
-        chat: (m, t) => geminiChat(settings, m, t),
-        chatStream: (m, t, onDelta) =>
-          geminiStreamResult(buildGeminiBody(m, t), geminiUrl(settings, true), onDelta),
+        chat: (m, t, signal) => geminiChat(settings, m, t, signal),
+        chatStream: (m, t, onDelta, signal) =>
+          geminiStreamResult(buildGeminiBody(m, t), geminiUrl(settings, true), onDelta, signal),
       };
     default:
       // openai / openrouter / custom / local 均走 OpenAI 兼容协议
       return {
-        chat: (m, t) => openAiCompatibleChat(settings, m, t),
-        chatStream: (m, t, onDelta) => openAiCompatibleChat(settings, m, t, onDelta),
+        chat: (m, t, signal) => openAiCompatibleChat(settings, m, t, undefined, signal),
+        chatStream: (m, t, onDelta, signal) =>
+          openAiCompatibleChat(settings, m, t, onDelta, signal),
       };
   }
 }

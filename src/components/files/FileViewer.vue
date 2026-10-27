@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import { api, type FsReadResult } from "@/services/api";
 
@@ -10,6 +10,24 @@ const props = defineProps<{
 const loading = ref(false);
 const error = ref<string | null>(null);
 const data = ref<FsReadResult | null>(null);
+
+const IMAGE_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  ico: "image/x-icon",
+  avif: "image/avif",
+};
+
+const imageSrc = computed(() => {
+  if (!props.path || !data.value?.binary) return null;
+  const ext = props.path.split(".").pop()?.toLowerCase() ?? "";
+  const mime = IMAGE_MIME[ext];
+  return mime ? `data:${mime};base64,${data.value.content}` : null;
+});
 
 async function load() {
   data.value = null;
@@ -60,8 +78,18 @@ function fmtSize(size: number): string {
     <EmptyState
       v-else-if="!path"
       title="未选择文件"
-      description="点击左侧文件树中的文本文件进行预览。"
+      description="点击左侧文件树中的文本或图片文件进行预览。"
     />
+    <div
+      v-else-if="imageSrc && !data?.truncated"
+      class="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-surface p-4"
+    >
+      <img
+        :src="imageSrc"
+        :alt="path ?? ''"
+        class="max-h-full max-w-full rounded-lg object-contain shadow-lg shadow-black/30"
+      />
+    </div>
     <EmptyState
       v-else-if="data?.binary"
       title="二进制文件"

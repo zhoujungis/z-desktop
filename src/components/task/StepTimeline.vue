@@ -1,7 +1,7 @@
 <script lang="ts">
 /** 时间线条目（步骤记录或从 activity 事件构建） */
 export interface TimelineItem {
-  status: "done" | "running" | "failed" | "blocked" | "pending";
+  status: "done" | "running" | "failed" | "blocked" | "cancelled" | "pending";
   tool: string | null;
   title: string;
   detail: string | null;
@@ -13,6 +13,7 @@ const DOT: Record<TimelineItem["status"], string> = {
   running: "bg-accent-soft text-accent",
   failed: "bg-danger/15 text-danger",
   blocked: "bg-warn/15 text-warn",
+  cancelled: "bg-zinc-500/15 text-zinc-400",
   pending: "bg-zinc-500/15 text-zinc-500",
 };
 
@@ -21,6 +22,7 @@ const GLYPH: Record<TimelineItem["status"], string> = {
   running: "●",
   failed: "✗",
   blocked: "!",
+  cancelled: "⊘",
   pending: "○",
 };
 

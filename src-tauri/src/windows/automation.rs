@@ -105,7 +105,11 @@ pub fn build_matcher(
     depth: u32,
 ) -> Result<UIMatcher, String> {
     let root = resolve_root(auto, window)?;
-    let mut matcher = auto.create_matcher().from_ref(&root).depth(depth).timeout(4000);
+    let mut matcher = auto
+        .create_matcher()
+        .from_ref(&root)
+        .depth(depth)
+        .timeout(4000);
 
     if let Some(aid) = automation_id {
         let aid = aid.to_string();

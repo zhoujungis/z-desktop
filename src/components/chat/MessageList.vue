@@ -8,6 +8,7 @@ const props = defineProps<{
 }>();
 
 const listRef = ref<HTMLElement | null>(null);
+const copiedId = ref<string | null>(null);
 
 watch(
   () => props.messages.length,
@@ -22,6 +23,29 @@ function fmtTime(ts: number): string {
   const d = new Date(ts);
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function copy(m: Message) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(m.content);
+    } else {
+      throw new Error("clipboard unavailable");
+    }
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = m.content;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  }
+  copiedId.value = m.id;
+  window.setTimeout(() => {
+    if (copiedId.value === m.id) copiedId.value = null;
+  }, 1500);
 }
 </script>
 
@@ -48,11 +72,18 @@ function fmtTime(ts: number): string {
           "
         >
           <p class="whitespace-pre-wrap break-words">{{ m.content }}</p>
-          <div
-            class="mt-1 text-right text-[10px]"
-            :class="m.role === 'user' ? 'text-white/60' : 'text-zinc-500'"
-          >
-            {{ fmtTime(m.created_at) }}
+          <div class="mt-1 flex items-center justify-end gap-2 text-[10px]">
+            <button
+              v-if="m.role !== 'user'"
+              type="button"
+              class="rounded px-1 py-0.5 text-zinc-500 transition-colors hover:bg-surface-raised hover:text-zinc-300"
+              @click="copy(m)"
+            >
+              {{ copiedId === m.id ? "已复制" : "复制" }}
+            </button>
+            <span :class="m.role === 'user' ? 'text-white/60' : 'text-zinc-500'">
+              {{ fmtTime(m.created_at) }}
+            </span>
           </div>
         </div>
       </div>

@@ -31,6 +31,7 @@ export async function verify(
   llm: LlmClient,
   userPrompt: string,
   finalText: string,
+  signal?: AbortSignal,
 ): Promise<VerifyResult> {
   const messages: ChatMessage[] = [
     {
@@ -44,11 +45,13 @@ export async function verify(
     },
   ];
   try {
-    const res = await llm.chat(messages, []);
+    const res = await llm.chat(messages, [], signal);
     const text = (res.text ?? "").trim();
     const passed = parseVerdict(text);
     return { passed, reason: text || (passed ? "验证通过" : "验证未通过") };
   } catch (e) {
+    // 用户主动停止导致的取消必须向上抛出，不能按“验证通过”处理
+    if (signal?.aborted) throw e;
     // 验证器不可用时采纳最终输出，避免验证环节死循环
     return {
       passed: true,

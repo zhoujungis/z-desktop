@@ -10,6 +10,7 @@ import TaskList from "@/components/task/TaskList.vue";
 import type { ActivityPayload, EventRecord, TaskStep } from "@/services/api";
 import { useAgentStore } from "@/stores/agent";
 import { useTaskStore } from "@/stores/task";
+import { toolMetaOf } from "@/tools/registry";
 
 const route = useRoute();
 const agent = useAgentStore();
@@ -47,9 +48,13 @@ function stepsToTimeline(steps: TaskStep[]): TimelineItem[] {
             ? "failed"
             : s.status === "blocked"
               ? "blocked"
-              : "pending",
+              : s.status === "cancelled"
+                ? "cancelled"
+                : "pending",
     tool: s.tool,
-    title: s.tool ?? s.input?.slice(0, 60) ?? "步骤",
+    title: s.tool
+      ? `${toolMetaOf(s.tool).icon} ${toolMetaOf(s.tool).label}`
+      : (s.input?.slice(0, 60) ?? "步骤"),
     detail: [s.input, s.output].filter((v): v is string => Boolean(v)).join("\n———\n") || null,
     time: s.created_at,
   }));
@@ -77,7 +82,10 @@ function activitiesToTimeline(list: ActivityPayload[]): TimelineItem[] {
   const items: TimelineItem[] = [];
   for (const a of list) {
     if (a.type === "tool_started") {
-      items.push({ status: "running", tool: a.tool, title: a.tool ?? "执行工具", detail: a.detail, time: a.time });
+      const title = a.tool
+        ? `${toolMetaOf(a.tool).icon} ${toolMetaOf(a.tool).label}`
+        : "执行工具";
+      items.push({ status: "running", tool: a.tool, title, detail: a.detail, time: a.time });
     } else if (a.type === "tool_completed") {
       markLastRunning(items, "done", a.detail);
     } else if (a.type === "tool_failed") {

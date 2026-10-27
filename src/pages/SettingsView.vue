@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, reactive, ref } from "vue";
 import SectionCard from "@/components/common/SectionCard.vue";
+import type { AppSettings } from "@/services/api";
+import { createLlmClient } from "@/services/llm";
 import { useSettingsStore } from "@/stores/settings";
 
 const settingsStore = useSettingsStore();
@@ -29,6 +31,10 @@ const form = reactive({
 const saving = ref(false);
 const message = ref<string | null>(null);
 const messageOk = ref(false);
+const showKey = ref(false);
+const testing = ref(false);
+const testMessage = ref<string | null>(null);
+const testOk = ref(false);
 let timer: number | undefined;
 
 function baseUrlPlaceholder(): string {
@@ -54,6 +60,46 @@ function modelPlaceholder(): string {
       return "qwen2.5:7b";
     default:
       return "gpt-4o-mini";
+  }
+}
+
+// 切换 Provider 时清空旧地址与模型，避免把 OpenAI 的 base_url 带到 Anthropic
+function onProviderChange() {
+  form.base_url = "";
+  form.model = "";
+  testMessage.value = null;
+}
+
+function currentSettings(): AppSettings {
+  return {
+    ...settingsStore.settings,
+    ...form,
+    max_steps: Math.max(1, Math.min(200, Math.floor(form.max_steps) || 30)),
+  };
+}
+
+async function testConnection() {
+  if (testing.value) return;
+  testing.value = true;
+  testMessage.value = null;
+  // 使用当前表单内容测试，未保存也可以验证配置
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 20_000);
+  try {
+    const llm = createLlmClient(currentSettings());
+    const res = await llm.chat(
+      [{ role: "user", content: "请只回复 OK，用于测试连接。" }],
+      [],
+      controller.signal,
+    );
+    testOk.value = true;
+    testMessage.value = `连接成功：${(res.text ?? "").trim().slice(0, 80) || "已收到响应"}`;
+  } catch (e) {
+    testOk.value = false;
+    testMessage.value = `连接失败：${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    window.clearTimeout(timeout);
+    testing.value = false;
   }
 }
 
@@ -94,11 +140,14 @@ onUnmounted(() => window.clearTimeout(timer));
       {{ message }}
     </p>
 
-    <SectionCard title="LLM 提供商" subtitle="api_key / model / base_url 均来自此处配置">
+    <SectionCard
+      title="LLM 提供商"
+      subtitle="api_key / model / base_url 均来自此处配置；切换 Provider 会清空 Base URL 与模型"
+    >
       <div class="space-y-3">
         <label class="block">
           <span class="mb-1 block text-xs text-zinc-400">Provider</span>
-          <select v-model="form.provider" class="input">
+          <select v-model="form.provider" class="input" @change="onProviderChange">
             <option v-for="p in PROVIDERS" :key="p.value" :value="p.value">{{ p.label }}</option>
           </select>
         </label>
@@ -108,18 +157,41 @@ onUnmounted(() => window.clearTimeout(timer));
         </label>
         <label class="block">
           <span class="mb-1 block text-xs text-zinc-400">API Key</span>
-          <input
-            v-model="form.api_key"
-            type="password"
-            autocomplete="off"
-            class="input font-mono text-xs"
-            placeholder="sk-…（本地模型可留空）"
-          />
+          <div class="relative">
+            <input
+              v-model="form.api_key"
+              :type="showKey ? 'text' : 'password'"
+              autocomplete="off"
+              class="input pr-14 font-mono text-xs"
+              placeholder="sk-…（本地模型可留空）"
+            />
+            <button
+              type="button"
+              class="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1.5 py-1 text-[10px] text-zinc-500 hover:bg-surface-overlay hover:text-zinc-300"
+              @click="showKey = !showKey"
+            >
+              {{ showKey ? "隐藏" : "显示" }}
+            </button>
+          </div>
         </label>
         <label class="block">
           <span class="mb-1 block text-xs text-zinc-400">模型</span>
           <input v-model="form.model" class="input font-mono text-xs" :placeholder="modelPlaceholder()" />
         </label>
+        <div class="flex flex-wrap items-center gap-3 pt-1">
+          <button
+            type="button"
+            class="btn-ghost text-xs"
+            :disabled="testing"
+            @click="testConnection"
+          >
+            {{ testing ? "测试中…" : "测试连接" }}
+          </button>
+          <span v-if="testMessage" class="text-xs" :class="testOk ? 'text-ok' : 'text-danger'">
+            {{ testMessage }}
+          </span>
+          <span v-else class="text-xs text-zinc-600">使用当前表单内容测试，无需先保存</span>
+        </div>
       </div>
     </SectionCard>
 
