@@ -1,6 +1,6 @@
 [package]
 name = "z-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "Z Desktop - AI Computer Workspace"
 authors = ["Z Desktop"]
 edition = "2021"

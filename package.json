@@ -1,7 +1,7 @@
 {
   "name": "z-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Z Desktop - AI Computer Workspace",
   "type": "module",
   "scripts": {
