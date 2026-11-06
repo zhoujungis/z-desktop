@@ -805,3 +805,11 @@ cargo clippy --all-targets --locked -- -D warnings
 ## License
 
 MIT
+
+---
+
+## 相关阅读
+
+- 博客：[尘世栈帧 · 技术、编程、AI 与科学](https://blog.zhoujun.dev/)
+- 项目专题：[开源项目拆解](https://blog.zhoujun.dev/topics/projects/)
+- 整体设计：[Z Bot：本地优先的私人 AI 助理怎么搭](https://blog.zhoujun.dev/article/z-bot-local-first-ai-assistant/)
